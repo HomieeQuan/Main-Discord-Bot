@@ -4,6 +4,7 @@ require('dotenv').config();
 // Import configurations
 const connectDB = require('./config/connectdb');
 const { createDiscordClient, connectDiscordBot } = require('./config/discordClient');
+const AutomationScheduler = require('./utils/automationScheduler');
 
 // Import for loading commands
 const fs = require('fs');
@@ -42,6 +43,12 @@ async function startBot() {
         client.once('ready', () => {
             console.log(`✅ Bot is online! Logged in as ${client.user.tag}`);
             console.log(`🎯 Bot is in ${client.guilds.cache.size} server(s)`);
+            
+            // Start automation scheduler
+            console.log('🤖 Starting daily automation scheduler...');
+            client.automationScheduler = new AutomationScheduler(client);
+            client.automationScheduler.start();
+            console.log('✅ Daily automation scheduler started successfully');
         });
 
         // Handle slash commands

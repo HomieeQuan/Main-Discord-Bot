@@ -1,4 +1,4 @@
-// models/EventLog.js
+// models/EventLog.js - Updated to track attendees passed for tryouts
 const mongoose = require('mongoose');
 
 // This defines what an event submission looks like
@@ -31,9 +31,17 @@ const eventLogSchema = new mongoose.Schema({
         type: String,
         required: true        // Must have proof
     },
-    quantity: {           // NEW: Track how many events
+    quantity: {           // Track how many events
         type: Number,
         default: 1
+    },
+    // NEW: Attendees passed tracking for tryouts
+    attendeesPassed: {
+        type: Number,
+        default: undefined,   // Only set for tryout events
+        min: 0,
+        max: 50,
+        sparse: true         // Only index documents that have this field
     },
     submittedAt: {
         type: Date,
@@ -99,6 +107,13 @@ eventLogSchema.index({ boostedPoints: 1, pointsAwarded: 1 }, {
 eventLogSchema.index({ submittedAt: 1, eventType: 1 }, { 
     name: 'date_range_idx',
     background: true 
+});
+
+// NEW: Tryout analysis index (for attendees passed statistics)
+eventLogSchema.index({ eventType: 1, attendeesPassed: 1 }, { 
+    name: 'tryout_analysis_idx',
+    background: true,
+    sparse: true  // Only index documents that have attendeesPassed
 });
 
 console.log('✅ EventLog indexes configured successfully');

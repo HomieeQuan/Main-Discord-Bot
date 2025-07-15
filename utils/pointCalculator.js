@@ -1,6 +1,6 @@
-// This class handles all point calculations
+// utils/pointCalculator.js - Updated with your new point values
 class PointCalculator {
-    // Point values for each event type (based on your requirements)
+    // UPDATED point values for each event type
     static eventPoints = {
         'patrol_30min': 1,
         'attend_event': 2,
@@ -9,10 +9,10 @@ class PointCalculator {
         'backup_request': 3,
         'ghost_protection_good': 4,
         'ghost_protection_bad': 2,
-        'tet_private': 1,
-        'tet_public': 2,
+        'tet_private': 2,              
+        'tet_public': 3,               
         'slrpd_inspection': 2,
-        'combat_training': 1,
+        'combat_training': 2,          
         'swat_inspection': 3,
         'gang_deployment': 4
     };
@@ -34,10 +34,35 @@ class PointCalculator {
         'gang_deployment': 'Gang Deployment'
     };
 
-    // Calculate points for an event (with optional booster bonus)
+    // Calculate base points for an event (without booster multiplier)
+    static calculateBasePoints(eventType) {
+        return this.eventPoints[eventType] || 0;
+    }
+
+    // Calculate points for an event with optional booster bonus
     static calculatePoints(eventType, isBooster = false) {
-        const basePoints = this.eventPoints[eventType] || 0;
+        const basePoints = this.calculateBasePoints(eventType);
         return isBooster ? basePoints * 2 : basePoints;
+    }
+
+    // NEW: Calculate total points including attendees bonus
+    static calculatePointsWithAttendeesBonus(eventType, isBooster = false, attendeesPassed = 0) {
+        const basePoints = this.calculateBasePoints(eventType);
+        
+        // Only tryouts get attendees bonus
+        const isTryoutEvent = eventType === 'tet_private' || eventType === 'tet_public';
+        const attendeesBonus = isTryoutEvent ? attendeesPassed : 0;
+        
+        // Total points before booster multiplier
+        const totalBeforeBooster = basePoints + attendeesBonus;
+        
+        // Apply booster multiplier to the total (base + bonus)
+        return isBooster ? totalBeforeBooster * 2 : totalBeforeBooster;
+    }
+
+    // NEW: Check if event type supports attendees bonus
+    static supportsTryoutBonus(eventType) {
+        return eventType === 'tet_private' || eventType === 'tet_public';
     }
 
     // Get human-readable name for an event type
@@ -48,6 +73,56 @@ class PointCalculator {
     // Get all available event types (for command choices)
     static getAllEventTypes() {
         return Object.keys(this.eventPoints);
+    }
+
+    // NEW: Get tryout-specific event types
+    static getTryoutEventTypes() {
+        return ['tet_private', 'tet_public'];
+    }
+
+    // NEW: Calculate detailed breakdown for display purposes
+    static getPointsBreakdown(eventType, isBooster = false, attendeesPassed = 0, quantity = 1) {
+        const basePoints = this.calculateBasePoints(eventType);
+        const isTryoutEvent = this.supportsTryoutBonus(eventType);
+        const attendeesBonus = isTryoutEvent ? attendeesPassed : 0;
+        
+        const pointsPerEvent = basePoints + attendeesBonus;
+        const multiplier = isBooster ? 2 : 1;
+        const finalPointsPerEvent = pointsPerEvent * multiplier;
+        const totalPoints = finalPointsPerEvent * quantity;
+        
+        return {
+            basePoints,
+            attendeesBonus,
+            pointsPerEvent,
+            multiplier,
+            finalPointsPerEvent,
+            quantity,
+            totalPoints,
+            isBooster,
+            isTryoutEvent
+        };
+    }
+
+    // NEW: Format points breakdown for display
+    static formatPointsBreakdown(breakdown) {
+        let explanation = `${breakdown.basePoints} base`;
+        
+        if (breakdown.attendeesBonus > 0) {
+            explanation += ` + ${breakdown.attendeesBonus} bonus (${breakdown.attendeesBonus} attendees passed)`;
+        }
+        
+        explanation += ` = ${breakdown.pointsPerEvent} pts`;
+        
+        if (breakdown.isBooster) {
+            explanation += ` × 2 (booster) = ${breakdown.finalPointsPerEvent} pts`;
+        }
+        
+        if (breakdown.quantity > 1) {
+            explanation += ` × ${breakdown.quantity} events = ${breakdown.totalPoints} total pts`;
+        }
+        
+        return explanation;
     }
 }
 

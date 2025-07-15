@@ -1,4 +1,4 @@
-// commands/admin-tools.js (HR only emergency commands)
+// commands/admin-tools.js - UPDATED with proper Commander+ restrictions
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
@@ -8,7 +8,7 @@ const SWATEmbeds = require('../views/embedBuilder');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('admin-tools')
-        .setDescription('Emergency admin tools (HR only)')
+        .setDescription('Emergency admin tools (Commander+ only)')
         .addSubcommand(subcommand =>
             subcommand
                 .setName('backup-users')
@@ -50,21 +50,44 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('emergency-reset')
-                .setDescription('Emergency system reset (DANGEROUS)')
+                .setDescription('Emergency system reset (DANGEROUS - Commander+ only)')
                 .addStringOption(option =>
                     option.setName('confirmation')
                         .setDescription('Type "CONFIRM_EMERGENCY_RESET" to proceed')
                         .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('permissions-check')
+                .setDescription('Check user permissions (debugging tool)')
+                .addUserOption(option =>
+                    option.setName('user')
+                        .setDescription('User to check permissions for')
+                        .setRequired(false)))
         .setDMPermission(false),
 
     async execute(interaction) {
-        // Check HR permission
-        if (!PermissionChecker.canManageSystem(interaction.member)) {
-            const errorEmbed = SWATEmbeds.createErrorEmbed('🚫 Only HR can use admin tools!');
+        // ===== NEW: COMMANDER+ PERMISSION CHECK =====
+        if (!PermissionChecker.canUseEmergencyCommands(interaction.member)) {
+            const errorMessage = PermissionChecker.getPermissionErrorMessage('commander');
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ff0000')
+                .setTitle('🚫 Access Denied')
+                .setDescription(errorMessage)
+                .addFields({
+                    name: '🎯 Required Permission',
+                    value: '**A | SWAT Commander** or **Admin** role required for emergency commands',
+                    inline: false
+                })
+                .setFooter({ text: 'These commands are restricted due to their critical nature' })
+                .setTimestamp();
+            
             return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
 
         const subcommand = interaction.options.getSubcommand();
+
+        // Log Commander+ command usage
+        console.log(`🚨 ADMIN COMMAND: ${interaction.user.username} used /admin-tools ${subcommand}`);
 
         switch (subcommand) {
             case 'backup-users':
@@ -91,14 +114,72 @@ module.exports = {
             case 'emergency-reset':
                 await this.emergencyReset(interaction);
                 break;
+            case 'permissions-check':
+                await this.checkPermissions(interaction);
+                break;
         }
     },
+
+    // ===== NEW: PERMISSION DEBUGGING COMMAND =====
+    async checkPermissions(interaction) {
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const member = await interaction.guild.members.fetch(targetUser.id);
+        
+        const permissionInfo = PermissionChecker.getUserPermissionInfo(member);
+        const roleHierarchy = PermissionChecker.getRoleHierarchy();
+        
+        const embed = new EmbedBuilder()
+            .setColor('#0099ff')
+            .setTitle(`🔍 Permission Check - ${targetUser.username}`)
+            .setThumbnail(targetUser.displayAvatarURL())
+            .addFields(
+                {
+                    name: '🎭 Highest Role',
+                    value: permissionInfo.highestRole,
+                    inline: true
+                },
+                {
+                    name: '📊 Permission Level',
+                    value: permissionInfo.roleLevel.toString(),
+                    inline: true
+                },
+                {
+                    name: '💎 Server Booster',
+                    value: permissionInfo.permissions.isBooster ? '✅ Yes (2x Points)' : '❌ No',
+                    inline: true
+                },
+                {
+                    name: '🔐 Access Levels',
+                    value: [
+                        `Commander+: ${permissionInfo.permissions.isCommander ? '✅' : '❌'}`,
+                        `HR+: ${permissionInfo.permissions.isHRPlus ? '✅' : '❌'}`,
+                        `Operator: ${permissionInfo.permissions.isOperator ? '✅' : '❌'}`
+                    ].join('\n'),
+                    inline: false
+                }
+            )
+            .setTimestamp();
+
+        // Add role validation
+        const roleValidation = PermissionChecker.validateRoles(interaction.guild);
+        if (!roleValidation.valid) {
+            embed.addFields({
+                name: '⚠️ Missing Roles',
+                value: roleValidation.missingRoles.join('\n') || 'All roles configured',
+                inline: false
+            });
+        }
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    },
+
+    // ===== EXISTING METHODS WITH ENHANCED LOGGING =====
 
     async backupUsers(interaction) {
         try {
             await interaction.deferReply({ ephemeral: true });
             
-            console.log('📊 Creating user data backup...');
+            console.log(`📊 Creating user data backup by ${interaction.user.username}...`);
             const users = await SWATUser.find({}).sort({ allTimePoints: -1 });
             
             const backup = {
@@ -107,7 +188,8 @@ module.exports = {
                     backupType: 'user_data',
                     totalUsers: users.length,
                     botVersion: '1.0.0',
-                    generatedBy: interaction.user.username
+                    generatedBy: interaction.user.username,
+                    generatedByRole: PermissionChecker.getUserHighestRoleName(interaction.member)
                 },
                 users: users.map(u => ({
                     discordId: u.discordId,
@@ -121,6 +203,10 @@ module.exports = {
                     weeklyEvents: u.weeklyEvents,
                     quotaStreak: u.quotaStreak || 0,
                     dailyPointsToday: u.dailyPointsToday || 0,
+                    // NEW: Include rank data
+                    rankName: u.rankName,
+                    rankLevel: u.rankLevel,
+                    rankPoints: u.rankPoints,
                     createdAt: u.createdAt,
                     updatedAt: u.updatedAt
                 }))
@@ -129,7 +215,6 @@ module.exports = {
             const backupText = JSON.stringify(backup, null, 2);
             const fileName = `swat_users_backup_${new Date().toISOString().split('T')[0]}.json`;
             
-            // Create attachment
             const attachment = new AttachmentBuilder(Buffer.from(backupText), { name: fileName });
             
             const embed = new EmbedBuilder()
@@ -138,7 +223,8 @@ module.exports = {
                 .addFields(
                     { name: '👥 Users Backed Up', value: users.length.toString(), inline: true },
                     { name: '📅 Backup Date', value: new Date().toLocaleDateString(), inline: true },
-                    { name: '💾 File Size', value: `${Math.round(backupText.length / 1024)} KB`, inline: true }
+                    { name: '💾 File Size', value: `${Math.round(backupText.length / 1024)} KB`, inline: true },
+                    { name: '👤 Generated By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
                 .setDescription('User data backup has been generated. Download the attached file to save locally.')
                 .setTimestamp();
@@ -148,7 +234,7 @@ module.exports = {
                 files: [attachment]
             });
 
-            console.log(`✅ User backup created: ${users.length} users`);
+            console.log(`✅ User backup created: ${users.length} users by ${interaction.user.username}`);
             
         } catch (error) {
             console.error('❌ User backup error:', error);
@@ -165,7 +251,7 @@ module.exports = {
             const dateLimit = new Date();
             dateLimit.setDate(dateLimit.getDate() - days);
             
-            console.log(`📋 Creating event logs backup (last ${days} days)...`);
+            console.log(`📋 Creating event logs backup (last ${days} days) by ${interaction.user.username}...`);
             const events = await EventLog.find({ 
                 submittedAt: { $gte: dateLimit }
             }).sort({ submittedAt: -1 });
@@ -180,7 +266,8 @@ module.exports = {
                         from: dateLimit.toISOString(),
                         to: new Date().toISOString()
                     },
-                    generatedBy: interaction.user.username
+                    generatedBy: interaction.user.username,
+                    generatedByRole: PermissionChecker.getUserHighestRoleName(interaction.member)
                 },
                 events: events.map(e => ({
                     userId: e.userId,
@@ -190,6 +277,7 @@ module.exports = {
                     pointsAwarded: e.pointsAwarded,
                     boostedPoints: e.boostedPoints,
                     quantity: e.quantity || 1,
+                    attendeesPassed: e.attendeesPassed, // NEW: Include attendees data
                     submittedAt: e.submittedAt,
                     screenshotUrl: e.screenshotUrl,
                     hrAction: e.hrAction
@@ -207,7 +295,8 @@ module.exports = {
                 .addFields(
                     { name: '📊 Events Backed Up', value: events.length.toString(), inline: true },
                     { name: '📅 Days Included', value: days.toString(), inline: true },
-                    { name: '💾 File Size', value: `${Math.round(backupText.length / 1024)} KB`, inline: true }
+                    { name: '💾 File Size', value: `${Math.round(backupText.length / 1024)} KB`, inline: true },
+                    { name: '👤 Generated By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
                 .setDescription(`Event logs backup for the last ${days} days has been generated.`)
                 .setTimestamp();
@@ -217,7 +306,7 @@ module.exports = {
                 files: [attachment]
             });
 
-            console.log(`✅ Event backup created: ${events.length} events`);
+            console.log(`✅ Event backup created: ${events.length} events by ${interaction.user.username}`);
             
         } catch (error) {
             console.error('❌ Event backup error:', error);
@@ -225,6 +314,66 @@ module.exports = {
             await interaction.editReply({ embeds: [errorEmbed] });
         }
     },
+
+    // ===== ENHANCED EMERGENCY RESET WITH BETTER WARNINGS =====
+    async emergencyReset(interaction) {
+        const confirmation = interaction.options.getString('confirmation');
+        
+        if (confirmation !== 'CONFIRM_EMERGENCY_RESET') {
+            const warningEmbed = new EmbedBuilder()
+                .setColor('#ff0000')
+                .setTitle('⚠️ EMERGENCY RESET - Confirmation Required')
+                .setDescription('**🚨 DANGER: This will reset ALL bot data! 🚨**\n\nThis action will:')
+                .addFields(
+                    { name: '🗑️ DELETE ALL DATA', value: '• All user points\n• All event logs\n• All statistics\n• All progress\n• All rank data', inline: false },
+                    { name: '⚠️ CANNOT BE UNDONE', value: 'This action is **PERMANENT** and **IRREVERSIBLE**', inline: false },
+                    { name: '🔒 To Confirm', value: 'Use: `/admin-tools emergency-reset confirmation:CONFIRM_EMERGENCY_RESET`', inline: false },
+                    { name: '💡 Alternative', value: 'Consider using `/admin-tools backup-users` and `/admin-tools backup-events` first!', inline: false }
+                )
+                .setFooter({ text: 'Only use this in extreme emergencies!' })
+                .setTimestamp();
+
+            return await interaction.reply({ embeds: [warningEmbed], ephemeral: true });
+        }
+
+        try {
+            await interaction.deferReply({ ephemeral: true });
+            
+            console.log(`🚨 EMERGENCY RESET INITIATED by ${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`);
+            
+            // Get counts before deletion
+            const userCount = await SWATUser.countDocuments();
+            const eventCount = await EventLog.countDocuments();
+            
+            // Perform the reset
+            await SWATUser.deleteMany({});
+            await EventLog.deleteMany({});
+            
+            const embed = new EmbedBuilder()
+                .setColor('#ff0000')
+                .setTitle('🚨 EMERGENCY RESET COMPLETE')
+                .setDescription('**ALL BOT DATA HAS BEEN RESET**')
+                .addFields(
+                    { name: '🗑️ Users Deleted', value: userCount.toString(), inline: true },
+                    { name: '🗑️ Events Deleted', value: eventCount.toString(), inline: true },
+                    { name: '👤 Reset By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
+                )
+                .setFooter({ text: 'Emergency reset completed - system is now clean' })
+                .setTimestamp();
+
+            await interaction.editReply({ embeds: [embed] });
+            
+            console.log(`🚨 EMERGENCY RESET COMPLETE - All data deleted by ${interaction.user.username}`);
+            
+        } catch (error) {
+            console.error('❌ Emergency reset error:', error);
+            const errorEmbed = SWATEmbeds.createErrorEmbed('Emergency reset failed - data may be in inconsistent state!');
+            await interaction.editReply({ embeds: [errorEmbed] });
+        }
+    },
+
+    // ===== KEEP EXISTING METHODS (fix-booster, fix-quota, etc.) =====
+    // [Including the rest of your existing methods with enhanced logging...]
 
     async fixBoosterStatus(interaction) {
         const targetUser = interaction.options.getUser('user');
@@ -245,20 +394,22 @@ module.exports = {
             user.isBooster = isActuallyBooster;
             await user.save();
 
+            console.log(`🔧 Booster fix: ${interaction.user.username} fixed ${targetUser.username} (${wasBooster ? 'WAS' : 'NOT'} → ${isActuallyBooster ? 'IS' : 'NOT'} booster)`);
+
             // Create audit log
             const auditLog = new EventLog({
                 userId: targetUser.id,
                 username: targetUser.username,
                 eventType: 'hr_booster_fix',
-                description: `HR fixed booster status: ${wasBooster ? 'WAS' : 'NOT'} → ${isActuallyBooster ? 'IS' : 'NOT'} booster`,
+                description: `Commander fixed booster status: ${wasBooster ? 'WAS' : 'NOT'} → ${isActuallyBooster ? 'IS' : 'NOT'} booster`,
                 pointsAwarded: 0,
                 boostedPoints: false,
-                screenshotUrl: 'HR_BOOSTER_FIX',
+                screenshotUrl: 'COMMANDER_BOOSTER_FIX',
                 hrAction: {
                     hrUser: interaction.user.id,
                     hrUsername: interaction.user.username,
                     action: 'fix_booster_status',
-                    reason: 'Manual booster status correction'
+                    reason: 'Commander manual booster status correction'
                 }
             });
             await auditLog.save();
@@ -269,9 +420,10 @@ module.exports = {
                 .addFields(
                     { name: '👤 User', value: targetUser.username, inline: true },
                     { name: '🔄 Previous', value: wasBooster ? 'Booster 💎' : 'Regular', inline: true },
-                    { name: '✅ Current', value: isActuallyBooster ? 'Booster 💎' : 'Regular', inline: true }
+                    { name: '✅ Current', value: isActuallyBooster ? 'Booster 💎' : 'Regular', inline: true },
+                    { name: '👤 Fixed By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
-                .setFooter({ text: `Fixed by ${interaction.user.username}` })
+                .setFooter({ text: 'Booster status correction logged' })
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -283,43 +435,7 @@ module.exports = {
         }
     },
 
-    async fixQuotaStatus(interaction) {
-        try {
-            await interaction.deferReply({ ephemeral: true });
-            
-            console.log('🔧 Recalculating quota statuses...');
-            const users = await SWATUser.find({});
-            let fixedCount = 0;
-
-            for (const user of users) {
-                const shouldBeCompleted = user.weeklyPoints >= user.weeklyQuota;
-                if (user.quotaCompleted !== shouldBeCompleted) {
-                    user.quotaCompleted = shouldBeCompleted;
-                    await user.save();
-                    fixedCount++;
-                }
-            }
-
-            const embed = new EmbedBuilder()
-                .setColor('#00ff00')
-                .setTitle('🎯 Quota Status Fix Complete')
-                .addFields(
-                    { name: '👥 Users Checked', value: users.length.toString(), inline: true },
-                    { name: '🔧 Quotas Fixed', value: fixedCount.toString(), inline: true },
-                    { name: '✅ Success Rate', value: `${Math.round(((users.length - fixedCount) / users.length) * 100)}%`, inline: true }
-                )
-                .setDescription(fixedCount > 0 ? `Fixed ${fixedCount} incorrect quota statuses` : 'All quota statuses were already correct')
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [embed] });
-            console.log(`✅ Quota fix complete: ${fixedCount}/${users.length} fixed`);
-            
-        } catch (error) {
-            console.error('❌ Fix quota error:', error);
-            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to fix quota statuses');
-            await interaction.editReply({ embeds: [errorEmbed] });
-        }
-    },
+    // ===== MISSING METHODS - ADDING THEM BACK =====
 
     async getDatabaseStats(interaction) {
         try {
@@ -352,7 +468,8 @@ module.exports = {
                     { name: '📊 Weekly Points', value: totalWeeklyPoints.toString(), inline: true },
                     { name: '⭐ All-Time Points', value: totalAllTimePoints.toString(), inline: true },
                     { name: '📈 Avg Points/User', value: userCount > 0 ? Math.round(totalWeeklyPoints / userCount).toString() : '0', inline: true },
-                    { name: '🏥 Database Status', value: '✅ Healthy', inline: true }
+                    { name: '🏥 Database Status', value: '✅ Healthy', inline: true },
+                    { name: '👤 Viewed By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
                 .setFooter({ text: 'Database statistics updated in real-time' })
                 .setTimestamp();
@@ -366,11 +483,50 @@ module.exports = {
         }
     },
 
+    async fixQuotaStatus(interaction) {
+        try {
+            await interaction.deferReply({ ephemeral: true });
+            
+            console.log(`🔧 Recalculating quota statuses by ${interaction.user.username}...`);
+            const users = await SWATUser.find({});
+            let fixedCount = 0;
+
+            for (const user of users) {
+                const shouldBeCompleted = user.weeklyPoints >= user.weeklyQuota;
+                if (user.quotaCompleted !== shouldBeCompleted) {
+                    user.quotaCompleted = shouldBeCompleted;
+                    await user.save();
+                    fixedCount++;
+                }
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor('#00ff00')
+                .setTitle('🎯 Quota Status Fix Complete')
+                .addFields(
+                    { name: '👥 Users Checked', value: users.length.toString(), inline: true },
+                    { name: '🔧 Quotas Fixed', value: fixedCount.toString(), inline: true },
+                    { name: '✅ Success Rate', value: `${Math.round(((users.length - fixedCount) / users.length) * 100)}%`, inline: true },
+                    { name: '👤 Fixed By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
+                )
+                .setDescription(fixedCount > 0 ? `Fixed ${fixedCount} incorrect quota statuses` : 'All quota statuses were already correct')
+                .setTimestamp();
+
+            await interaction.editReply({ embeds: [embed] });
+            console.log(`✅ Quota fix complete: ${fixedCount}/${users.length} fixed by ${interaction.user.username}`);
+            
+        } catch (error) {
+            console.error('❌ Fix quota error:', error);
+            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to fix quota statuses');
+            await interaction.editReply({ embeds: [errorEmbed] });
+        }
+    },
+
     async fixRanks(interaction) {
         try {
             await interaction.deferReply({ ephemeral: true });
             
-            console.log('📊 Recalculating user ranks and trends...');
+            console.log(`📊 Recalculating user ranks and trends by ${interaction.user.username}...`);
             const users = await SWATUser.find({}).sort({ weeklyPoints: -1 });
             let updatedCount = 0;
 
@@ -391,13 +547,14 @@ module.exports = {
                 .addFields(
                     { name: '👥 Users Processed', value: users.length.toString(), inline: true },
                     { name: '🔄 Ranks Updated', value: updatedCount.toString(), inline: true },
-                    { name: '✅ Accuracy', value: '100%', inline: true }
+                    { name: '✅ Accuracy', value: '100%', inline: true },
+                    { name: '👤 Updated By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
                 .setDescription('All user ranks and trend calculations have been refreshed')
                 .setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });
-            console.log(`✅ Rank fix complete: ${updatedCount}/${users.length} updated`);
+            console.log(`✅ Rank fix complete: ${updatedCount}/${users.length} updated by ${interaction.user.username}`);
             
         } catch (error) {
             console.error('❌ Fix ranks error:', error);
@@ -410,7 +567,7 @@ module.exports = {
         try {
             await interaction.deferReply({ ephemeral: true });
             
-            console.log('🏥 Performing comprehensive health check...');
+            console.log(`🏥 Performing comprehensive health check by ${interaction.user.username}...`);
             
             // Simplified health check (since we might not have the full HealthMonitor)
             const health = await this.basicHealthCheck();
@@ -425,9 +582,9 @@ module.exports = {
                 .addFields(
                     { name: '🗄️ Database', value: health.database, inline: true },
                     { name: '📊 Data Integrity', value: health.dataIntegrity, inline: true },
-                    { name: '⚡ Performance', value: health.performance, inline: true }
+                    { name: '⚡ Performance', value: health.performance, inline: true },
+                    { name: '👤 Checked By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
-                .setFooter({ text: 'Health check completed' })
                 .setTimestamp();
 
             if (health.issues.length > 0) {
@@ -498,61 +655,6 @@ module.exports = {
                 performance: '❌ Error',
                 issues: ['Database connection failed']
             };
-        }
-    },
-
-    async emergencyReset(interaction) {
-        const confirmation = interaction.options.getString('confirmation');
-        
-        if (confirmation !== 'CONFIRM_EMERGENCY_RESET') {
-            const warningEmbed = new EmbedBuilder()
-                .setColor('#ff0000')
-                .setTitle('⚠️ EMERGENCY RESET - Confirmation Required')
-                .setDescription('**DANGER: This will reset ALL bot data!**\n\nThis action will:')
-                .addFields(
-                    { name: '🗑️ DELETE ALL DATA', value: '• All user points\n• All event logs\n• All statistics\n• All progress', inline: false },
-                    { name: '⚠️ CANNOT BE UNDONE', value: 'This action is **PERMANENT** and **IRREVERSIBLE**', inline: false },
-                    { name: '🔒 To Confirm', value: 'Use: `/admin-tools emergency-reset confirmation:CONFIRM_EMERGENCY_RESET`', inline: false }
-                )
-                .setFooter({ text: 'Only use this in extreme emergencies!' })
-                .setTimestamp();
-
-            return await interaction.reply({ embeds: [warningEmbed], ephemeral: true });
-        }
-
-        try {
-            await interaction.deferReply({ ephemeral: true });
-            
-            console.log('🚨 EMERGENCY RESET INITIATED by', interaction.user.username);
-            
-            // Get counts before deletion
-            const userCount = await SWATUser.countDocuments();
-            const eventCount = await EventLog.countDocuments();
-            
-            // Perform the reset
-            await SWATUser.deleteMany({});
-            await EventLog.deleteMany({});
-            
-            const embed = new EmbedBuilder()
-                .setColor('#ff0000')
-                .setTitle('🚨 EMERGENCY RESET COMPLETE')
-                .setDescription('**ALL BOT DATA HAS BEEN RESET**')
-                .addFields(
-                    { name: '🗑️ Users Deleted', value: userCount.toString(), inline: true },
-                    { name: '🗑️ Events Deleted', value: eventCount.toString(), inline: true },
-                    { name: '👤 Reset By', value: interaction.user.username, inline: true }
-                )
-                .setFooter({ text: 'Emergency reset completed - system is now clean' })
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [embed] });
-            
-            console.log('🚨 EMERGENCY RESET COMPLETE - All data deleted');
-            
-        } catch (error) {
-            console.error('❌ Emergency reset error:', error);
-            const errorEmbed = SWATEmbeds.createErrorEmbed('Emergency reset failed - data may be in inconsistent state!');
-            await interaction.editReply({ embeds: [errorEmbed] });
         }
     }
 };
