@@ -1,4 +1,4 @@
-// controllers/eventController.js - Updated with rank progression integration and display names
+// controllers/eventController.js - FIXED point system for proper rank progression
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const PointCalculator = require('../utils/pointCalculator');
@@ -6,10 +6,11 @@ const PermissionChecker = require('../utils/permissionChecker');
 const SWATEmbeds = require('../views/embedBuilder');
 const RankSystem = require('../utils/rankSystem');
 const PromotionChecker = require('../utils/promotionChecker');
+const QuotaSystem = require('../utils/quotaSystem');
 const { EmbedBuilder } = require('discord.js');
 
 class EventController {
-    // Updated to handle rank progression alongside point system
+    // FIXED: Updated to properly handle rank progression alongside point system
     static async submitEvent(interaction, eventType, description, screenshot, quantity = 1, attendeesPassed = 0) {
         try {
             // Step 1: Check permissions
@@ -42,7 +43,7 @@ class EventController {
             if (!user) {
                 user = new SWATUser({
                     discordId: interaction.user.id,
-                    username: interaction.member.displayName || interaction.user.username, // FIXED: Use display name
+                    username: interaction.member.displayName || interaction.user.username,
                     isBooster: PermissionChecker.isBooster(interaction.member),
                     // Rank system defaults are set in schema
                     rankName: 'Probationary Operator',
@@ -50,7 +51,7 @@ class EventController {
                     rankPoints: 0
                 });
             } else {
-                user.username = interaction.member.displayName || interaction.user.username; // FIXED: Use display name
+                user.username = interaction.member.displayName || interaction.user.username;
                 user.isBooster = PermissionChecker.isBooster(interaction.member);
             }
 
@@ -71,21 +72,43 @@ class EventController {
             // Multiply by quantity for total points
             const totalPoints = actualPointsPerEvent * quantity;
 
-            // Step 6: Update LEADERBOARD points (existing system)
+            // FIXED: Step 6 - Update points (unified system)
+            const oldWeeklyPoints = user.weeklyPoints;
+            const oldAllTimePoints = user.allTimePoints;
+            const oldRankPoints = user.rankPoints;
+            
             user.weeklyPoints += totalPoints;
             user.allTimePoints += totalPoints;
             user.totalEvents += quantity;
             user.weeklyEvents += quantity;
-            user.quotaCompleted = user.weeklyPoints >= user.weeklyQuota;
 
-            // Step 7: Update RANK points (NEW - separate from leaderboard points)
-            // Only add rank points if user is not at Executive+ level (hand-picked ranks)
+            // FIXED: Step 7 - Update rank points (unified with point system)
+            // Only track rank points if user is not at Executive+ level (hand-picked ranks)
             if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
                 user.rankPoints += totalPoints;
-                console.log(`📈 Rank points: ${user.username} gained ${totalPoints} rank points (now ${user.rankPoints})`);
+                console.log(`📈 Rank progression: ${user.username} gained ${totalPoints} rank points (${oldRankPoints} → ${user.rankPoints})`);
+            } else {
+                console.log(`👑 Executive rank: ${user.username} - rank points not tracked for hand-picked ranks`);
             }
 
-            // Step 8: Daily points tracking (existing feature)
+            // FIXED: Step 8 - Update quota status using rank-based quota system
+            const currentQuota = QuotaSystem.getUserQuota(user);
+            user.weeklyQuota = currentQuota;
+            user.quotaCompleted = QuotaSystem.isQuotaCompleted(user);
+
+            // FIXED: Step 9 - Check for promotion eligibility after point updates
+            const eligibilityBefore = user.promotionEligible;
+            const eligibilityCheck = RankSystem.checkPromotionEligibility(user);
+            user.promotionEligible = eligibilityCheck.eligible;
+
+            // Log promotion eligibility changes
+            if (!eligibilityBefore && eligibilityCheck.eligible) {
+                console.log(`🎯 PROMOTION ELIGIBLE: ${user.username} is now eligible for promotion to ${eligibilityCheck.nextRank?.name}`);
+            } else if (eligibilityBefore && !eligibilityCheck.eligible) {
+                console.log(`⚠️ PROMOTION LOST: ${user.username} is no longer eligible (${eligibilityCheck.reason})`);
+            }
+
+            // Step 10: Daily points tracking (existing feature)
             const now = new Date();
             const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -96,15 +119,15 @@ class EventController {
                 user.dailyPointsToday = (user.dailyPointsToday || 0) + totalPoints;
             }
 
-            // Step 9: Update rank tracking for trends
+            // Step 11: Update rank tracking for trends
             if (!user.previousRank || user.previousRank === 0) {
                 const currentRank = await SWATUser.countDocuments({ 
-                    weeklyPoints: { $gt: user.weeklyPoints - totalPoints }
+                    weeklyPoints: { $gt: oldWeeklyPoints }
                 }) + 1;
                 user.previousRank = currentRank;
             }
 
-            // Step 10: Update quota streak tracking
+            // Step 12: Update quota streak tracking
             if (user.quotaCompleted && !user.lastQuotaCompletion) {
                 user.lastQuotaCompletion = now;
                 user.quotaStreak = (user.quotaStreak || 0) + 1;
@@ -112,16 +135,25 @@ class EventController {
 
             await user.save();
 
-            // Step 11: Check for promotion eligibility (NEW)
+            // FIXED: Step 13 - Enhanced promotion eligibility check
             let promotionResult = null;
             try {
-                promotionResult = await PromotionChecker.checkPromotionEligibility(interaction.user.id);
+                if (eligibilityCheck.eligible && !eligibilityBefore) {
+                    // User just became eligible - create promotion result
+                    promotionResult = {
+                        newlyEligible: true,
+                        user: user,
+                        currentRank: RankSystem.getRankByLevel(user.rankLevel),
+                        nextRank: eligibilityCheck.nextRank,
+                        requirements: eligibilityCheck.requirements
+                    };
+                }
             } catch (error) {
-                console.error('❌ Promotion check error:', error);
+                console.error('❌ Promotion eligibility check error:', error);
                 // Don't fail the entire submission if promotion check fails
             }
 
-            // Step 12: Create enhanced event log
+            // Step 14: Create enhanced event log
             const enhancedDescription = isTryoutEvent && attendeesPassed > 0 
                 ? `${description} (${attendeesPassed} attendees passed)`
                 : description;
@@ -132,7 +164,7 @@ class EventController {
 
             const eventLog = new EventLog({
                 userId: interaction.user.id,
-                username: interaction.member.displayName || interaction.user.username, // FIXED: Use display name
+                username: interaction.member.displayName || interaction.user.username,
                 eventType,
                 description: finalDescription,
                 pointsAwarded: totalPoints,
@@ -148,7 +180,7 @@ class EventController {
 
             await eventLog.save();
 
-            // Step 13: Create response embed with rank information
+            // Step 15: Create response embed with enhanced rank information
             const embed = this.createEnhancedSubmissionEmbed(
                 user, eventType, description, totalPoints, basePointsPerEvent, 
                 isBooster, screenshot, quantity, attendeesPassed, attendeesBonus
@@ -156,38 +188,44 @@ class EventController {
 
             await interaction.editReply({ embeds: [embed] });
 
-            // Step 14: Send promotion notification if user became eligible
+            // FIXED: Step 16 - Send promotion notification if user became eligible
             if (promotionResult && promotionResult.newlyEligible) {
-                const promoNotification = PromotionChecker.createEligibilityNotification(promotionResult);
-                if (promoNotification) {
-                    const promoEmbed = new EmbedBuilder()
-                        .setColor(promoNotification.color)
-                        .setTitle(promoNotification.title)
-                        .setDescription(promoNotification.description)
-                        .addFields(promoNotification.fields)
-                        .setTimestamp();
+                try {
+                    const promoNotification = PromotionChecker.createEligibilityNotification(promotionResult);
+                    if (promoNotification) {
+                        const promoEmbed = new EmbedBuilder()
+                            .setColor(promoNotification.color)
+                            .setTitle(promoNotification.title)
+                            .setDescription(promoNotification.description)
+                            .addFields(promoNotification.fields)
+                            .setTimestamp();
 
-                    // Send as follow-up message to user
-                    await interaction.followUp({ 
-                        embeds: [promoEmbed], 
-                        ephemeral: true 
-                    });
+                        // Send as follow-up message to user
+                        await interaction.followUp({ 
+                            embeds: [promoEmbed], 
+                            ephemeral: true 
+                        });
 
-                    // TODO: Also notify HR (will add in Phase 3)
-                    console.log(`🎯 PROMOTION NOTIFICATION: ${user.username} eligible for ${promotionResult.nextRank.name}`);
+                        console.log(`🎯 PROMOTION NOTIFICATION SENT: ${user.username} eligible for ${promotionResult.nextRank.name}`);
+                    }
+                } catch (notificationError) {
+                    console.error('❌ Promotion notification error:', notificationError);
                 }
             }
 
-            // Enhanced logging
+            // Enhanced logging with detailed point tracking
             console.log(`📊 Event submitted by ${user.username}:`);
             console.log(`   - Event: ${eventType} x${quantity}`);
-            console.log(`   - Leaderboard points: ${totalPoints}`);
-            console.log(`   - Rank points: +${totalPoints} (total: ${user.rankPoints})`);
+            console.log(`   - Points awarded: ${totalPoints}`);
+            console.log(`   - Weekly points: ${oldWeeklyPoints} → ${user.weeklyPoints}`);
+            console.log(`   - All-time points: ${oldAllTimePoints} → ${user.allTimePoints}`);
+            console.log(`   - Rank points: ${oldRankPoints} → ${user.rankPoints}`);
             console.log(`   - Current rank: ${RankSystem.formatRank(user)}`);
+            console.log(`   - Promotion eligible: ${user.promotionEligible}`);
             if (isTryoutEvent && attendeesPassed > 0) {
                 console.log(`   - Attendees bonus: +${attendeesPassed} points`);
             }
-            console.log(`   - Weekly total: ${user.weeklyPoints}/${user.weeklyQuota}`);
+            console.log(`   - Weekly quota: ${user.weeklyPoints}/${user.weeklyQuota} (${user.quotaCompleted ? 'COMPLETED' : 'IN PROGRESS'})`);
 
         } catch (error) {
             console.error('❌ Event submission error:', error);
@@ -201,7 +239,7 @@ class EventController {
         }
     }
 
-    // Create enhanced submission embed with rank progression information
+    // ENHANCED: Create enhanced submission embed with detailed rank progression
     static createEnhancedSubmissionEmbed(user, eventType, description, totalPoints, basePoints, isBooster, screenshot, quantity, attendeesPassed, attendeesBonus) {
         const isTryoutEvent = attendeesPassed > 0;
         
@@ -236,9 +274,10 @@ class EventController {
             }
         }
 
-        // Add rank progression info
+        // ENHANCED: Add rank progression info with better details
         const rankProgress = RankSystem.createRankProgressBar(user);
         const currentRank = RankSystem.formatRank(user);
+        const eligibility = RankSystem.checkPromotionEligibility(user);
         
         embed.addFields(
             { 
@@ -263,13 +302,29 @@ class EventController {
             }
         );
 
-        // Add rank progression (only for non-Executive ranks)
+        // ENHANCED: Add rank progression (only for non-Executive ranks)
         if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
             embed.addFields({
                 name: '📈 Rank Progress',
                 value: rankProgress,
                 inline: false
             });
+            
+            // Add promotion status
+            if (eligibility.eligible) {
+                embed.addFields({
+                    name: '🎯 Promotion Status',
+                    value: `✅ **ELIGIBLE** for promotion to ${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}!`,
+                    inline: false
+                });
+            } else if (eligibility.nextRank) {
+                const pointsNeeded = eligibility.requirements.pointsRemaining;
+                embed.addFields({
+                    name: '📈 Next Promotion',
+                    value: `${pointsNeeded} more rank points needed for ${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}`,
+                    inline: false
+                });
+            }
         } else {
             embed.addFields({
                 name: '👑 Executive Status',
@@ -308,8 +363,13 @@ class EventController {
             embed.setDescription(embed.data.description + '\n\n🎉 **Congratulations! You\'ve completed your weekly quota!**');
         }
 
+        // ENHANCED: Add promotion notification
+        if (eligibility.eligible && !user.promotionEligible) {
+            embed.setDescription(embed.data.description + '\n\n🎯 **You\'re now eligible for promotion! HR has been notified.**');
+        }
+
         embed.setFooter({ 
-            text: `Total Events: ${user.totalEvents} | Rank Points: +${totalPoints}` 
+            text: `Total Events: ${user.totalEvents} | Rank Points: ${user.rankPoints} | All-Time: ${user.allTimePoints}` 
         });
 
         return embed;

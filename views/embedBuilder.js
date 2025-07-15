@@ -1,4 +1,4 @@
-// views/embedBuilder.js - Enhanced with rank system integration and clean leaderboard
+// views/embedBuilder.js - Enhanced with rank system integration and CLEAN leaderboard
 const { EmbedBuilder } = require('discord.js');
 const PointCalculator = require('../utils/pointCalculator');
 
@@ -141,15 +141,16 @@ class SWATEmbeds {
             // Fallback to basic embed
             return this.createBasicPersonalStatsEmbed(user, discordUser, weeklyRank, allTimeRank, recentEvents);
         }
-    }// CLEAN MINIMAL LEADERBOARD - NEW DESIGN
+    }
+
+    // FIXED: CLEAN MINIMAL LEADERBOARD - No trophy spam, simple design
     static async createEnhancedLeaderboardEmbed(users, type = 'weekly', enhancedStats = null) {
         try {
             const RankSystem = require('../utils/rankSystem');
-            const StatisticsController = require('../controllers/statisticsController');
             
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
-                .setTitle(`🏆 SWAT ${type === 'weekly' ? 'Weekly' : 'All-Time'} Leaderboard`)
+                .setTitle(`SWAT ${type === 'weekly' ? 'Weekly' : 'All-Time'} Leaderboard`)
                 .setTimestamp();
 
             // Filter active users (with points > 0) and limit to 25
@@ -163,70 +164,57 @@ class SWATEmbeds {
                 return embed;
             }
 
-            // Generate top operator (always #1)
-            const topOperator = activeUsers[0];
-            const topPoints = type === 'weekly' ? topOperator.weeklyPoints : topOperator.allTimePoints;
-            const topTrend = await this.calculateTrendIndicator(topOperator, 1);
-            const topRankEmoji = RankSystem.isEliteOrHigher(topOperator.rankLevel) ? 
-                `${RankSystem.getRankEmoji(topOperator.rankLevel)} ` : '';
-
-            const topOperatorText = `🏆 ${topRankEmoji}**${topOperator.username}** - ${topPoints} points ${topTrend}`;
-
-            embed.addFields({
-                name: '🏆 Top Operator',
-                value: topOperatorText,
-                inline: false
-            });
-
-            // Generate all other operators (if more than 1)
-            if (activeUsers.length > 1) {
-                const otherOperators = [];
+            // Generate clean operator list
+            const operatorLines = [];
+            
+            for (let i = 0; i < activeUsers.length; i++) {
+                const user = activeUsers[i];
+                const points = type === 'weekly' ? user.weeklyPoints : user.allTimePoints;
+                const position = i + 1;
                 
-                for (let i = 1; i < activeUsers.length; i++) {
-                    const user = activeUsers[i];
-                    const points = type === 'weekly' ? user.weeklyPoints : user.allTimePoints;
-                    const position = i + 1;
-                    const trend = await this.calculateTrendIndicator(user, position);
-                    const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
-                        `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
-
-                    const line = `${position}. ${rankEmoji}**${user.username}** - ${points} points ${trend}`;
-                    otherOperators.push(line);
-                }
-
-                // Split into chunks if too long for one field (Discord has 1024 char limit per field)
-                const operatorText = otherOperators.join('\n');
+                // CLEAN DESIGN: Only rank emoji for Elite+ ranks
+                const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
+                    `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
                 
-                if (operatorText.length <= 1024) {
-                    embed.addFields({
-                        name: '📊 All Operators',
-                        value: operatorText,
-                        inline: false
-                    });
-                } else {
-                    // Split into multiple fields if too long
-                    const midPoint = Math.ceil(otherOperators.length / 2);
-                    const firstHalf = otherOperators.slice(0, midPoint).join('\n');
-                    const secondHalf = otherOperators.slice(midPoint).join('\n');
-
-                    embed.addFields(
-                        {
-                            name: '📊 All Operators',
-                            value: firstHalf,
-                            inline: false
-                        },
-                        {
-                            name: '📊 All Operators (continued)',
-                            value: secondHalf,
-                            inline: false
-                        }
-                    );
-                }
+                // CLEAN DESIGN: Only trophy for #1, simple numbers for everyone else
+                const positionDisplay = position === 1 ? '🏆' : `${position}.`;
+                
+                const line = `${positionDisplay} ${rankEmoji}**${user.username}** - ${points} pts`;
+                operatorLines.push(line);
             }
 
-            // Add simple footer with count
+            // Split into chunks if needed (Discord 1024 char limit per field)
+            const allOperatorsText = operatorLines.join('\n');
+            
+            if (allOperatorsText.length <= 1024) {
+                embed.addFields({
+                    name: 'Rankings',
+                    value: allOperatorsText,
+                    inline: false
+                });
+            } else {
+                // Split into two fields if too long
+                const midPoint = Math.ceil(operatorLines.length / 2);
+                const firstHalf = operatorLines.slice(0, midPoint).join('\n');
+                const secondHalf = operatorLines.slice(midPoint).join('\n');
+
+                embed.addFields(
+                    {
+                        name: 'Rankings',
+                        value: firstHalf,
+                        inline: false
+                    },
+                    {
+                        name: 'Rankings (continued)',
+                        value: secondHalf,
+                        inline: false
+                    }
+                );
+            }
+
+            // Simple footer
             embed.setFooter({ 
-                text: `Showing ${activeUsers.length} active operator${activeUsers.length === 1 ? '' : 's'}` 
+                text: `${activeUsers.length} active operator${activeUsers.length === 1 ? '' : 's'}` 
             });
 
             return embed;
@@ -238,37 +226,6 @@ class SWATEmbeds {
         }
     }
 
-    // Helper method to calculate trend indicators
-    static async calculateTrendIndicator(user, currentPosition) {
-        try {
-            const StatisticsController = require('../controllers/statisticsController');
-            
-            // Check if user has a previous rank stored
-            const previousRank = user.previousRank;
-            
-            if (!previousRank || previousRank === 0) {
-                // New user to leaderboard
-                return '🆕';
-            }
-            
-            const rankChange = previousRank - currentPosition;
-            
-            if (rankChange > 0) {
-                // Moved up
-                return `⬆️${rankChange}`;
-            } else if (rankChange < 0) {
-                // Moved down
-                return `⬇️${Math.abs(rankChange)}`;
-            } else {
-                // No change
-                return '➡️';
-            }
-            
-        } catch (error) {
-            console.error('❌ Trend calculation error:', error);
-            return ''; // Return empty if calculation fails
-        }
-    }// Fallback basic personal stats embed (in case rank system fails)
     // Fallback basic personal stats embed (in case rank system fails)
     static createBasicPersonalStatsEmbed(user, discordUser, weeklyRank, allTimeRank, recentEvents = []) {
         const ProgressBarGenerator = require('../utils/progressBar');
@@ -334,7 +291,7 @@ class SWATEmbeds {
         return embed;
     }
 
-    // Clean basic leaderboard embed
+    // FIXED: Clean basic leaderboard embed
     static createBasicLeaderboardEmbed(users, type = 'weekly') {
         const RankSystem = require('../utils/rankSystem');
         
@@ -354,40 +311,27 @@ class SWATEmbeds {
             return embed;
         }
 
-        // Top operator
-        const topOperator = activeUsers[0];
-        const topPoints = type === 'weekly' ? topOperator.weeklyPoints : topOperator.allTimePoints;
-        const topRankEmoji = RankSystem.isEliteOrHigher(topOperator.rankLevel) ? 
-            `${RankSystem.getRankEmoji(topOperator.rankLevel)} ` : '';
+        // Clean list
+        const operatorLines = [];
+        
+        for (let i = 0; i < activeUsers.length; i++) {
+            const user = activeUsers[i];
+            const points = type === 'weekly' ? user.weeklyPoints : user.allTimePoints;
+            const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
+                `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
+            const positionDisplay = i === 0 ? '🏆' : `${i + 1}.`;
+            
+            operatorLines.push(`${positionDisplay} ${rankEmoji}**${user.username}** - ${points} pts`);
+        }
 
         embed.addFields({
-            name: '🏆 Top Operator',
-            value: `🏆 ${topRankEmoji}**${topOperator.username}** - ${topPoints} points`,
+            name: 'Rankings',
+            value: operatorLines.join('\n'),
             inline: false
         });
 
-        // Other operators
-        if (activeUsers.length > 1) {
-            const otherOperators = [];
-            
-            for (let i = 1; i < activeUsers.length; i++) {
-                const user = activeUsers[i];
-                const points = type === 'weekly' ? user.weeklyPoints : user.allTimePoints;
-                const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
-                    `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
-
-                otherOperators.push(`${i + 1}. ${rankEmoji}**${user.username}** - ${points} points`);
-            }
-
-            embed.addFields({
-                name: '📊 All Operators',
-                value: otherOperators.join('\n'),
-                inline: false
-            });
-        }
-
         embed.setFooter({ 
-            text: `Showing ${activeUsers.length} active operator${activeUsers.length === 1 ? '' : 's'}` 
+            text: `${activeUsers.length} active operator${activeUsers.length === 1 ? '' : 's'}` 
         });
 
         return embed;

@@ -1,4 +1,4 @@
-// commands/admin-users.js - User Management for departed members
+// commands/admin-users.js - FIXED username display to use server nicknames
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
@@ -90,7 +90,7 @@ module.exports = {
 
             // Get user stats before deletion
             const userStats = {
-                username: user.username,
+                username: user.username, // This already contains server nickname from previous updates
                 weeklyPoints: user.weeklyPoints,
                 allTimePoints: user.allTimePoints,
                 totalEvents: user.totalEvents,
@@ -104,7 +104,7 @@ module.exports = {
             // Create final audit log before deletion
             const finalAuditLog = new EventLog({
                 userId: targetUser.id,
-                username: user.username,
+                username: user.username, // FIXED: Uses the server nickname already stored in user.username
                 eventType: 'user_deletion',
                 description: `USER DELETED: ${user.username} - Reason: ${reason}`,
                 pointsAwarded: 0,
@@ -130,9 +130,9 @@ module.exports = {
             const confirmEmbed = new EmbedBuilder()
                 .setColor('#ff0000')
                 .setTitle('🗑️ User Deleted Successfully')
-                .setDescription(`**${userStats.username}** has been permanently removed from the system`)
+                .setDescription(`**${userStats.username}** has been permanently removed from the system`) // Uses server nickname
                 .addFields(
-                    { name: '👤 Deleted User', value: userStats.username, inline: true },
+                    { name: '👤 Deleted User', value: userStats.username, inline: true }, // Uses server nickname
                     { name: '📊 Points Lost', value: `${userStats.allTimePoints} all-time`, inline: true },
                     { name: '🎖️ Rank', value: userStats.rank, inline: true },
                     { name: '📋 Events Deleted', value: `${eventCount} events`, inline: true },
@@ -191,7 +191,7 @@ module.exports = {
                 // Show preview of who would be deleted
                 const previewText = inactiveUsers.slice(0, 15).map(user => {
                     const lastActive = this.getTimeSince(user.updatedAt);
-                    return `• **${user.username}** (${user.allTimePoints} pts) - Last active ${lastActive} ago`;
+                    return `• **${user.username}** (${user.allTimePoints} pts) - Last active ${lastActive} ago`; // Uses server nickname
                 }).join('\n');
 
                 const previewEmbed = new EmbedBuilder()
@@ -221,7 +221,7 @@ module.exports = {
                         // Create audit log
                         const auditLog = new EventLog({
                             userId: user.discordId,
-                            username: user.username,
+                            username: user.username, // FIXED: Uses server nickname already stored in database
                             eventType: 'auto_cleanup',
                             description: `AUTO CLEANUP: User deleted for ${days} days inactivity`,
                             pointsAwarded: 0,
@@ -242,7 +242,7 @@ module.exports = {
                         await EventLog.deleteMany({ userId: user.discordId });
                         await SWATUser.deleteOne({ discordId: user.discordId });
 
-                        deletedUsers.push(user.username);
+                        deletedUsers.push(user.username); // Uses server nickname
                         deletedCount++;
 
                     } catch (deleteError) {
@@ -263,9 +263,7 @@ module.exports = {
 
                 if (deletedUsers.length > 0) {
                     const deletedList = deletedUsers.slice(0, 10).join(', ');
-                    result
-
-Embed.addFields({
+                    resultEmbed.addFields({
                         name: '🗑️ Deleted Users',
                         value: deletedList + (deletedUsers.length > 10 ? ` and ${deletedUsers.length - 10} more` : ''),
                         inline: false
@@ -316,7 +314,7 @@ Embed.addFields({
 
             const inactiveList = inactiveUsers.slice(0, 20).map(user => {
                 const lastActive = this.getTimeSince(user.updatedAt);
-                return `• **${user.username}** - Last active ${lastActive} ago (${user.allTimePoints} pts)`;
+                return `• **${user.username}** - Last active ${lastActive} ago (${user.allTimePoints} pts)`; // Uses server nickname
             }).join('\n');
 
             embed.addFields({

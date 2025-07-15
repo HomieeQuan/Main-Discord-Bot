@@ -1,12 +1,13 @@
-// controllers/hrController.js
+// controllers/hrController.js - COMPLETE FILE with point system fixes
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const SWATEmbeds = require('../views/embedBuilder');
 const PermissionChecker = require('../utils/permissionChecker');
+const QuotaSystem = require('../utils/quotaSystem');
 const { EmbedBuilder } = require('discord.js');
 
 class HRController {
-    // Manage user points (add, remove, set, remove_all)
+    // FIXED: Manage user points - now properly updates rank progression
     static async managePoints(interaction, targetUser, action, amount, reason) {
         try {
             // Check HR permission
@@ -18,15 +19,19 @@ class HRController {
             // Get or create target user
             let user = await SWATUser.findOne({ discordId: targetUser.id });
             if (!user) {
+                // Get the target member to access displayName
+                const targetMember = await interaction.guild.members.fetch(targetUser.id);
                 user = new SWATUser({
                     discordId: targetUser.id,
-                    username: targetUser.username
+                    username: targetMember.displayName || targetUser.username
                 });
             }
 
             // Store old values for logging
             const oldWeeklyPoints = user.weeklyPoints;
             const oldAllTimePoints = user.allTimePoints;
+            const oldRankPoints = user.rankPoints;
+            const oldPromotionEligible = user.promotionEligible;
 
             // Handle remove_all action with safety checks
             if (action === 'remove_all') {
@@ -39,7 +44,7 @@ class HRController {
                         .addFields(
                             { 
                                 name: '💥 This Will Remove', 
-                                value: `• Weekly Points: **${user.weeklyPoints}**\n• All-Time Points: **${user.allTimePoints}**\n• Quota Completion Status: **${user.quotaCompleted ? 'Completed' : 'In Progress'}**`, 
+                                value: `• Weekly Points: **${user.weeklyPoints}**\n• All-Time Points: **${user.allTimePoints}**\n• Rank Points: **${user.rankPoints}**\n• Quota Completion Status: **${user.quotaCompleted ? 'Completed' : 'In Progress'}**`, 
                                 inline: false 
                             },
                             { 
@@ -70,17 +75,19 @@ class HRController {
                     return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
                 }
 
-                // Execute the nuclear option
+                // Execute the nuclear option - FIXED: Also reset rank points
                 user.weeklyPoints = 0;
                 user.allTimePoints = 0;
+                user.rankPoints = 0; // FIXED: Also reset rank points
                 user.quotaCompleted = false;
+                user.promotionEligible = false; // FIXED: Reset promotion eligibility
 
                 await user.save();
 
                 // Create comprehensive audit log for critical action
-                const auditLog = new EventLog({
+                const finalAuditLog = new EventLog({
                     userId: targetUser.id,
-                    username: targetUser.username,
+                    username: user.username,
                     eventType: 'hr_critical_action',
                     description: `🚨 CRITICAL HR ACTION: ALL POINTS REMOVED - Reason: ${reason}`,
                     pointsAwarded: -oldWeeklyPoints,
@@ -95,24 +102,28 @@ class HRController {
                         oldWeeklyPoints: oldWeeklyPoints,
                         newWeeklyPoints: 0,
                         oldAllTimePoints: oldAllTimePoints,
-                        newAllTimePoints: 0
+                        newAllTimePoints: 0,
+                        oldRankPoints: oldRankPoints, // FIXED: Track rank points
+                        newRankPoints: 0
                     }
                 });
 
-                await auditLog.save();
+                await finalAuditLog.save();
 
                 // Create dramatic response embed
                 const responseEmbed = new EmbedBuilder()
                     .setColor('#ff0000')
                     .setTitle('🚨 ALL POINTS REMOVED')
-                    .setDescription(`**ALL POINTS HAVE BEEN REMOVED** from ${targetUser.username}`)
+                    .setDescription(`**ALL POINTS HAVE BEEN REMOVED** from ${user.username}`)
                     .addFields(
-                        { name: '👤 Target User', value: targetUser.username, inline: true },
+                        { name: '👤 Target User', value: user.username, inline: true },
                         { name: '🔧 Action', value: '🚨 REMOVE ALL', inline: true },
-                        { name: '💥 Points Removed', value: `${oldWeeklyPoints} weekly\n${oldAllTimePoints} all-time`, inline: true },
+                        { name: '💥 Points Removed', value: `${oldWeeklyPoints} weekly\n${oldAllTimePoints} all-time\n${oldRankPoints} rank`, inline: true },
                         { name: '📊 Weekly Points', value: `${oldWeeklyPoints} → **0**`, inline: true },
                         { name: '⭐ All-Time Points', value: `${oldAllTimePoints} → **0**`, inline: true },
+                        { name: '🎖️ Rank Points', value: `${oldRankPoints} → **0**`, inline: true },
                         { name: '🎯 Quota Status', value: '✅ → ❌ Reset', inline: true },
+                        { name: '🎯 Promotion Status', value: '✅ → ❌ Reset', inline: true },
                         { name: '📝 Reason', value: reason, inline: false },
                         { name: '⚠️ CRITICAL ACTION', value: 'This user has had ALL points removed. This action has been logged for audit purposes and **cannot be undone**.', inline: false }
                     )
@@ -122,9 +133,10 @@ class HRController {
                 await interaction.reply({ embeds: [responseEmbed] });
 
                 // Enhanced logging for critical actions
-                console.log(`🚨 CRITICAL HR ACTION: ${interaction.user.username} REMOVED ALL POINTS from ${targetUser.username}`);
+                console.log(`🚨 CRITICAL HR ACTION: ${interaction.user.username} REMOVED ALL POINTS from ${user.username}`);
                 console.log(`   - Weekly points removed: ${oldWeeklyPoints}`);
                 console.log(`   - All-time points removed: ${oldAllTimePoints}`);
+                console.log(`   - Rank points removed: ${oldRankPoints}`);
                 console.log(`   - Reason: ${reason}`);
                 console.log(`   - Timestamp: ${new Date().toISOString()}`);
 
@@ -151,15 +163,47 @@ class HRController {
                     return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            // Update quota status
-            user.quotaCompleted = user.weeklyPoints >= user.weeklyQuota;
+            // FIXED: Update rank points properly for HR adjustments
+            const RankSystem = require('../utils/rankSystem');
+            if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
+                // For non-Executive ranks, adjust rank points by the same amount as the adjustment
+                if (action === 'add') {
+                    user.rankPoints += amount;
+                } else if (action === 'remove') {
+                    user.rankPoints = Math.max(0, user.rankPoints - amount);
+                } else if (action === 'set') {
+                    // For set action, calculate the difference and apply to rank points
+                    const difference = amount - oldWeeklyPoints;
+                    user.rankPoints = Math.max(0, user.rankPoints + difference);
+                }
+                // Note: remove_all action already handles rank points correctly (sets to 0)
+            } else {
+                // Executive+ ranks don't track rank points for promotion
+                user.rankPoints = 0;
+            }
+
+            // FIXED: Update quota status using rank-based quota system
+            const currentQuota = QuotaSystem.getUserQuota(user);
+            user.weeklyQuota = currentQuota;
+            user.quotaCompleted = QuotaSystem.isQuotaCompleted(user);
+
+            // FIXED: Update promotion eligibility after HR point changes
+            const eligibilityCheck = RankSystem.checkPromotionEligibility(user);
+            user.promotionEligible = eligibilityCheck.eligible;
+
+            // Log promotion eligibility changes
+            if (!oldPromotionEligible && eligibilityCheck.eligible) {
+                console.log(`🎯 PROMOTION ELIGIBLE: ${user.username} is now eligible for promotion to ${eligibilityCheck.nextRank?.name} (after HR point adjustment)`);
+            } else if (oldPromotionEligible && !eligibilityCheck.eligible) {
+                console.log(`⚠️ PROMOTION LOST: ${user.username} is no longer eligible (${eligibilityCheck.reason}) (after HR point adjustment)`);
+            }
 
             await user.save();
 
             // Create audit log entry
             const auditLog = new EventLog({
                 userId: targetUser.id,
-                username: targetUser.username,
+                username: user.username,
                 eventType: 'hr_point_adjustment',
                 description: `HR Action: ${action.toUpperCase()} ${amount} points - Reason: ${reason}`,
                 pointsAwarded: action === 'add' ? amount : (action === 'remove' ? -amount : amount - oldWeeklyPoints),
@@ -174,33 +218,58 @@ class HRController {
                     oldWeeklyPoints: oldWeeklyPoints,
                     newWeeklyPoints: user.weeklyPoints,
                     oldAllTimePoints: oldAllTimePoints,
-                    newAllTimePoints: user.allTimePoints
+                    newAllTimePoints: user.allTimePoints,
+                    oldRankPoints: oldRankPoints, // FIXED: Track rank points
+                    newRankPoints: user.rankPoints,
+                    promotionEligibilityChanged: oldPromotionEligible !== user.promotionEligible
                 }
             });
 
             await auditLog.save();
 
-            // Create response embed
+            // ENHANCED: Create response embed with rank progression info
             const embed = new EmbedBuilder()
                 .setColor('#ff6600')
                 .setTitle('🛠️ HR Points Management')
-                .setDescription(`**${action.charAt(0).toUpperCase() + action.slice(1)}** points for ${targetUser.username}`)
+                .setDescription(`**${action.charAt(0).toUpperCase() + action.slice(1)}** points for ${user.username}`)
                 .addFields(
-                    { name: '👤 Target User', value: targetUser.username, inline: true },
+                    { name: '👤 Target User', value: user.username, inline: true },
                     { name: '🔧 Action', value: action.charAt(0).toUpperCase() + action.slice(1), inline: true },
                     { name: '💯 Amount', value: amount.toString(), inline: true },
                     { name: '📊 Weekly Points', value: `${oldWeeklyPoints} → ${user.weeklyPoints}`, inline: true },
                     { name: '⭐ All-Time Points', value: `${oldAllTimePoints} → ${user.allTimePoints}`, inline: true },
+                    { name: '🎖️ Rank Points', value: `${oldRankPoints} → ${user.rankPoints}`, inline: true },
                     { name: '🎯 Quota Status', value: user.quotaCompleted ? '✅ Completed' : '⏳ In Progress', inline: true },
+                    { name: '🎯 Promotion Status', value: user.promotionEligible ? '✅ Eligible' : '❌ Not Eligible', inline: true },
                     { name: '📝 Reason', value: reason, inline: false }
                 )
                 .setFooter({ text: `Action performed by ${interaction.user.username}` })
                 .setTimestamp();
 
+            // Add promotion notification if eligibility changed
+            if (!oldPromotionEligible && user.promotionEligible) {
+                embed.addFields({
+                    name: '🎯 Promotion Update',
+                    value: `✅ User is now **ELIGIBLE** for promotion to ${eligibilityCheck.nextRank?.name}!`,
+                    inline: false
+                });
+            } else if (oldPromotionEligible && !user.promotionEligible) {
+                embed.addFields({
+                    name: '🎯 Promotion Update',
+                    value: `❌ User is no longer eligible for promotion (${eligibilityCheck.reason})`,
+                    inline: false
+                });
+            }
+
             await interaction.reply({ embeds: [embed] });
 
-            // Log to console for HR audit trail
-            console.log(`🛠️ HR ACTION: ${interaction.user.username} ${action}ed ${amount} points ${action === 'set' ? 'to' : action === 'add' ? 'to' : 'from'} ${targetUser.username} - Reason: ${reason}`);
+            // Enhanced logging with rank progression tracking
+            console.log(`🛠️ HR ACTION: ${interaction.user.username} ${action}ed ${amount} points ${action === 'set' ? 'to' : action === 'add' ? 'to' : 'from'} ${user.username}`);
+            console.log(`   - Weekly: ${oldWeeklyPoints} → ${user.weeklyPoints}`);
+            console.log(`   - All-time: ${oldAllTimePoints} → ${user.allTimePoints}`);
+            console.log(`   - Rank points: ${oldRankPoints} → ${user.rankPoints}`);
+            console.log(`   - Promotion eligible: ${oldPromotionEligible} → ${user.promotionEligible}`);
+            console.log(`   - Reason: ${reason}`);
 
         } catch (error) {
             console.error('❌ HR points management error:', error);
@@ -209,7 +278,7 @@ class HRController {
         }
     }
 
-    // Reset weekly statistics
+    // UPDATED: Reset weekly statistics with new rank-based quota system
     static async resetWeek(interaction, confirmReset) {
         try {
             // Check HR permission
@@ -224,12 +293,33 @@ class HRController {
                     .setTitle('⚠️ Weekly Reset Confirmation')
                     .setDescription('**WARNING: This will reset ALL weekly statistics!**\n\nThis action will:')
                     .addFields(
-                        { name: '🔄 Reset to Zero', value: '• Weekly points\n• Weekly events\n• Quota completion status\n• Daily points', inline: false },
-                        { name: '✅ Keep Unchanged', value: '• All-time points\n• Total events\n• User profiles', inline: false },
-                        { name: '⚠️ Cannot Be Undone', value: 'This action is **permanent** and cannot be reversed!', inline: false },
-                        { name: '🔒 Confirmation Required', value: 'Use `/reset-week confirm:true` to proceed', inline: false }
+                        { 
+                            name: '🔄 Reset to Zero', 
+                            value: '• Weekly points\n• Weekly events\n• Quota completion status\n• Daily points', 
+                            inline: false 
+                        },
+                        { 
+                            name: '🎯 NEW: Update Quotas', 
+                            value: '• Recalculate quotas based on current ranks\n• Apply rank-based quota system\n• Update completion status', 
+                            inline: false 
+                        },
+                        { 
+                            name: '✅ Keep Unchanged', 
+                            value: '• All-time points\n• Total events\n• User profiles\n• Rank progression\n• **Rank points (NOT reset)**', 
+                            inline: false 
+                        },
+                        { 
+                            name: '⚠️ Cannot Be Undone', 
+                            value: 'This action is **permanent** and cannot be reversed!', 
+                            inline: false 
+                        },
+                        { 
+                            name: '🔒 Confirmation Required', 
+                            value: 'Use `/reset-week confirm:true` to proceed', 
+                            inline: false 
+                        }
                     )
-                    .setFooter({ text: 'Only use this at the start of a new quota week!' });
+                    .setFooter({ text: 'NEW: Now includes rank-based quota updates! Rank points preserved!' });
 
                 return await interaction.reply({ embeds: [warningEmbed], ephemeral: true });
             }
@@ -243,6 +333,10 @@ class HRController {
             const topPerformer = users[0];
             const totalWeeklyPoints = users.reduce((sum, u) => sum + u.weeklyPoints, 0);
 
+            // Get quota statistics before reset
+            const quotaStats = QuotaSystem.getQuotaStatistics();
+            const usersNeedingQuotaUpdate = await QuotaSystem.getUsersNeedingQuotaUpdate();
+
             // Create weekly summary
             const summaryEmbed = new EmbedBuilder()
                 .setColor('#0099ff')
@@ -253,46 +347,79 @@ class HRController {
                     { name: '📊 Total Points Earned', value: totalWeeklyPoints.toString(), inline: true },
                     { name: '🏆 Top Performer', value: topPerformer ? `${topPerformer.username} (${topPerformer.weeklyPoints} pts)` : 'None', inline: true },
                     { name: '📈 Average Points', value: totalUsers > 0 ? (totalWeeklyPoints / totalUsers).toFixed(1) : '0', inline: true },
+                    { name: '🔧 Quota Updates Needed', value: `${usersNeedingQuotaUpdate.length} users`, inline: true },
                     { name: '🎯 Best Performers', value: users.slice(0, 3).map((u, i) => `${i + 1}. ${u.username} (${u.weeklyPoints} pts)`).join('\n') || 'None', inline: false }
                 )
                 .setTimestamp();
 
-            // Reset weekly statistics
-            const resetResult = await SWATUser.updateMany(
-                {},
-                {
-                    $set: {
-                        weeklyPoints: 0,
-                        weeklyEvents: 0,
-                        quotaCompleted: false,
-                        dailyPointsToday: 0,
-                        lastDailyReset: new Date(),
-                        previousWeeklyPoints: 0 // Reset for fresh trend tracking
-                    }
-                }
-            );
+            // UPDATED: Use new quota system for weekly reset
+            console.log('🔄 Applying weekly reset with rank-based quota system...');
+            const quotaResetResult = await QuotaSystem.applyWeeklyQuotaReset();
 
-            // Create reset confirmation embed
+            if (!quotaResetResult.success) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#ff0000')
+                    .setTitle('❌ Weekly Reset Failed')
+                    .setDescription(`Failed to apply quota reset: ${quotaResetResult.error}`)
+                    .setTimestamp();
+
+                return await interaction.editReply({ embeds: [errorEmbed] });
+            }
+
+            // Create reset confirmation embed with quota information
             const resetEmbed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('🔄 Weekly Reset Completed!')
-                .setDescription('✅ **Successfully started new quota week**')
+                .setDescription('✅ **Successfully started new quota week with rank-based quotas**')
                 .addFields(
                     { name: '📅 Reset Date', value: new Date().toLocaleString(), inline: true },
-                    { name: '👥 Users Reset', value: resetResult.modifiedCount.toString(), inline: true },
-                    { name: '🎯 New Quota Period', value: 'Week has been reset to 0/10 points for all operators', inline: false },
-                    { name: '📋 What Was Reset', value: '• Weekly points: 0\n• Weekly events: 0\n• Quota status: In Progress\n• Daily points: 0', inline: false }
+                    { name: '👥 Users Reset', value: quotaResetResult.usersUpdated.toString(), inline: true },
+                    { name: '🎯 Quota System', value: 'Rank-based quotas applied', inline: true },
+                    { 
+                        name: '📋 What Was Reset', 
+                        value: '• Weekly points: 0\n• Weekly events: 0\n• Quota status: In Progress\n• Daily points: 0\n• **NEW**: Quotas updated by rank\n• **PRESERVED**: Rank points & progression', 
+                        inline: false 
+                    },
+                    {
+                        name: '🎯 Quota Breakdown',
+                        value: [
+                            'Probationary (1): 10 pts',
+                            'Junior-Senior (2-4): 20 pts', 
+                            'Specialized-Elite (5-6): 25 pts',
+                            'Elite I-IV (7-10): 30 pts',
+                            'Executive+ (11-15): No quota'
+                        ].join('\n'),
+                        inline: false
+                    }
                 )
                 .setFooter({ text: `Reset performed by ${interaction.user.username}` })
                 .setTimestamp();
 
+            // Add quota change summary if any users had quota updates
+            if (usersNeedingQuotaUpdate.length > 0) {
+                const quotaChangeText = usersNeedingQuotaUpdate
+                    .slice(0, 5)
+                    .map(user => `• ${user.username}: ${user.currentQuota} → ${user.expectedQuota} pts`)
+                    .join('\n');
+                
+                resetEmbed.addFields({
+                    name: '🔧 Quota Updates Applied',
+                    value: quotaChangeText + (usersNeedingQuotaUpdate.length > 5 ? `\n... and ${usersNeedingQuotaUpdate.length - 5} more` : ''),
+                    inline: false
+                });
+            }
+
             await interaction.editReply({ 
-                content: '✅ **Weekly reset completed successfully!**',
+                content: '✅ **Weekly reset completed successfully with rank-based quotas!**',
                 embeds: [summaryEmbed, resetEmbed] 
             });
 
-            // Log to console for audit trail
-            console.log(`🔄 WEEKLY RESET: Performed by ${interaction.user.username} - ${resetResult.modifiedCount} users reset`);
+            // Enhanced logging
+            console.log(`🔄 WEEKLY RESET: Performed by ${interaction.user.username}`);
+            console.log(`   - Users reset: ${quotaResetResult.usersUpdated}`);
+            console.log(`   - Quota updates applied: ${usersNeedingQuotaUpdate.length}`);
+            console.log(`   - Quota system: Rank-based quotas now active`);
+            console.log(`   - Rank points: PRESERVED (not reset)`);
 
         } catch (error) {
             console.error('❌ Weekly reset error:', error);
@@ -305,9 +432,6 @@ class HRController {
             }
         }
     }
-
-    // View event logs with filtering
-   // Update to your existing hrController.js - replace the viewLogs method
 
     // View event logs with filtering and screenshot support
     static async viewLogs(interaction, targetUser = null, eventType = null, days = 7) {

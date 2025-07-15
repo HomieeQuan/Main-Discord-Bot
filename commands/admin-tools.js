@@ -483,37 +483,72 @@ module.exports = {
         }
     },
 
+    // UPDATED: Fix quota status with new rank-based quota system
     async fixQuotaStatus(interaction) {
         try {
             await interaction.deferReply({ ephemeral: true });
             
-            console.log(`🔧 Recalculating quota statuses by ${interaction.user.username}...`);
-            const users = await SWATUser.find({});
-            let fixedCount = 0;
-
-            for (const user of users) {
-                const shouldBeCompleted = user.weeklyPoints >= user.weeklyQuota;
-                if (user.quotaCompleted !== shouldBeCompleted) {
-                    user.quotaCompleted = shouldBeCompleted;
-                    await user.save();
-                    fixedCount++;
-                }
+            console.log(`🔧 Recalculating quota statuses with rank-based system by ${interaction.user.username}...`);
+            
+            // Use the new QuotaSystem for bulk quota updates
+            const QuotaSystem = require('../utils/quotaSystem');
+            const result = await QuotaSystem.updateAllUserQuotas();
+            
+            if (!result.success) {
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`Failed to update quotas: ${result.error}`);
+                return await interaction.editReply({ embeds: [errorEmbed] });
             }
 
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
-                .setTitle('🎯 Quota Status Fix Complete')
+                .setTitle('🎯 Quota System Fix Complete')
+                .setDescription('✅ **Rank-based quota system applied successfully!**')
                 .addFields(
-                    { name: '👥 Users Checked', value: users.length.toString(), inline: true },
-                    { name: '🔧 Quotas Fixed', value: fixedCount.toString(), inline: true },
-                    { name: '✅ Success Rate', value: `${Math.round(((users.length - fixedCount) / users.length) * 100)}%`, inline: true },
+                    { name: '👥 Users Checked', value: result.totalUsers.toString(), inline: true },
+                    { name: '🔧 Quotas Updated', value: result.updated.toString(), inline: true },
+                    { name: '📊 Completion Changes', value: result.completionChanges.toString(), inline: true },
+                    { 
+                        name: '🎯 Quota Structure', 
+                        value: [
+                            'Probationary: 10 pts',
+                            'Junior-Senior: 20 pts',
+                            'Specialized-Elite: 25 pts', 
+                            'Elite I-IV: 30 pts',
+                            'Executive+: No quota'
+                        ].join('\n'), 
+                        inline: false 
+                    },
                     { name: '👤 Fixed By', value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, inline: false }
                 )
-                .setDescription(fixedCount > 0 ? `Fixed ${fixedCount} incorrect quota statuses` : 'All quota statuses were already correct')
                 .setTimestamp();
 
+            // Add detailed quota changes if any occurred
+            if (result.updateResults && result.updateResults.length > 0) {
+                const changesText = result.updateResults
+                    .slice(0, 10)
+                    .map(change => {
+                        const statusChange = change.wasCompleted !== change.nowCompleted ? 
+                            (change.nowCompleted ? ' ✅→❌' : ' ❌→✅') : '';
+                        return `• ${change.username}: ${change.oldQuota}→${change.newQuota} pts${statusChange}`;
+                    })
+                    .join('\n');
+                
+                embed.addFields({
+                    name: '📋 Quota Changes Applied',
+                    value: changesText + (result.updateResults.length > 10 ? `\n... and ${result.updateResults.length - 10} more` : ''),
+                    inline: false
+                });
+            } else {
+                embed.addFields({
+                    name: '✅ Status',
+                    value: 'All quotas were already correct for current ranks',
+                    inline: false
+                });
+            }
+
             await interaction.editReply({ embeds: [embed] });
-            console.log(`✅ Quota fix complete: ${fixedCount}/${users.length} fixed by ${interaction.user.username}`);
+            
+            console.log(`✅ Quota fix complete: ${result.updated}/${result.totalUsers} updated by ${interaction.user.username}`);
             
         } catch (error) {
             console.error('❌ Fix quota error:', error);

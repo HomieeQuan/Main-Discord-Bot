@@ -1,4 +1,6 @@
-// commands/leaderboard.js
+// SIMPLIFIED: Remove position lookup from leaderboard command
+// Replace the entire leaderboard.js command file
+
 const { SlashCommandBuilder } = require('discord.js');
 const LeaderboardController = require('../controllers/leaderboardController');
 
@@ -12,18 +14,12 @@ module.exports = {
                 .setRequired(false)
                 .addChoices(
                     { name: 'Weekly Rankings', value: 'weekly' },
-                    { name: 'All-Time Rankings', value: 'alltime' },
-                    { name: 'My Position', value: 'position' }
+                    { name: 'All-Time Rankings', value: 'alltime' }
                 ))
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('Check specific user\'s position (works with "My Position" type)')
-                .setRequired(false))
         .setDMPermission(false),
 
     async execute(interaction) {
         const type = interaction.options.getString('type') || 'weekly';
-        const targetUser = interaction.options.getUser('user');
 
         switch (type) {
             case 'weekly':
@@ -32,11 +28,6 @@ module.exports = {
                 
             case 'alltime':
                 await LeaderboardController.getAllTimeLeaderboard(interaction);
-                break;
-                
-            case 'position':
-                const userToCheck = targetUser || interaction.user;
-                await LeaderboardController.getUserPosition(interaction, userToCheck);
                 break;
                 
             default:
