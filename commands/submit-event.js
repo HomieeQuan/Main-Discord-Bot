@@ -1,4 +1,4 @@
-// commands/submit-event.js - Updated with new point values and attendees system
+// commands/submit-event.js - FIXED null screenshot handling
 const { SlashCommandBuilder } = require('discord.js');
 const EventController = require('../controllers/eventController');
 
@@ -18,10 +18,10 @@ module.exports = {
                     { name: 'Backup Request (3pts)', value: 'backup_request' },
                     { name: 'GHOST Protection [Good Rating 7/10+] (4pts)', value: 'ghost_protection_good' },
                     { name: 'GHOST Protection [Bad Rating 6/10-] (2pts)', value: 'ghost_protection_bad' },
-                    { name: 'TET [Private Tryout] (2pts)', value: 'tet_private' },    // UPDATED: 1→2pts
-                    { name: 'TET [Public Tryout] (3pts)', value: 'tet_public' },     // UPDATED: 2→3pts
+                    { name: 'TET [Private Tryout] (2pts)', value: 'tet_private' },
+                    { name: 'TET [Public Tryout] (3pts)', value: 'tet_public' },
                     { name: 'SLRPD Inspection Ceremony (2pts)', value: 'slrpd_inspection' },
-                    { name: 'Combat Training (2pts)', value: 'combat_training' },    // UPDATED: 1→2pts
+                    { name: 'Combat Training (2pts)', value: 'combat_training' },
                     { name: 'SWAT Inspection Ceremony (3pts)', value: 'swat_inspection' },
                     { name: 'Deployment (4pts)', value: 'gang_deployment' }
                 ))
@@ -31,9 +31,17 @@ module.exports = {
                 .setRequired(true)
                 .setMaxLength(500))
         .addAttachmentOption(option =>
-            option.setName('screenshot')
-                .setDescription('Screenshot proof of the event(s)')
+            option.setName('screenshot1')
+                .setDescription('Primary screenshot proof (REQUIRED)')
                 .setRequired(true))
+        .addAttachmentOption(option =>
+            option.setName('screenshot2')
+                .setDescription('Additional screenshot proof (optional)')
+                .setRequired(false))
+        .addAttachmentOption(option =>
+            option.setName('screenshot3')
+                .setDescription('Additional screenshot proof (optional)')
+                .setRequired(false))
         .addIntegerOption(option =>
             option.setName('quantity')
                 .setDescription('How many times did you do this event? (Default: 1)')
@@ -51,9 +59,18 @@ module.exports = {
     async execute(interaction) {
         const eventType = interaction.options.getString('event-type');
         const description = interaction.options.getString('description');
-        const screenshot = interaction.options.getAttachment('screenshot');
+        const screenshot1 = interaction.options.getAttachment('screenshot1');
+        const screenshot2 = interaction.options.getAttachment('screenshot2');
+        const screenshot3 = interaction.options.getAttachment('screenshot3');
         const quantity = interaction.options.getInteger('quantity') || 1;
         const attendeesPassed = interaction.options.getInteger('attendees-passed') || 0;
+
+        // FIXED: Collect only non-null screenshots
+        const screenshots = [screenshot1];
+        if (screenshot2) screenshots.push(screenshot2);
+        if (screenshot3) screenshots.push(screenshot3);
+
+        console.log(`📸 Screenshots collected: ${screenshots.length} (screenshot1: ${!!screenshot1}, screenshot2: ${!!screenshot2}, screenshot3: ${!!screenshot3})`);
 
         // Validate attendees_passed is only used for tryouts
         const isTryoutEvent = eventType === 'tet_private' || eventType === 'tet_public';
@@ -72,7 +89,7 @@ module.exports = {
             });
         }
 
-        // Call the event controller with the new attendees parameter
-        await EventController.submitEvent(interaction, eventType, description, screenshot, quantity, attendeesPassed);
+        // Call the event controller with the screenshots array
+        await EventController.submitEvent(interaction, eventType, description, screenshots, quantity, attendeesPassed);
     },
 };

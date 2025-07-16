@@ -1,4 +1,4 @@
-// controllers/eventController.js - FIXED point system for proper rank progression
+// controllers/eventController.js - FIXED null screenshot validation
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const PointCalculator = require('../utils/pointCalculator');
@@ -10,8 +10,8 @@ const QuotaSystem = require('../utils/quotaSystem');
 const { EmbedBuilder } = require('discord.js');
 
 class EventController {
-    // FIXED: Updated to properly handle rank progression alongside point system
-    static async submitEvent(interaction, eventType, description, screenshot, quantity = 1, attendeesPassed = 0) {
+    // FIXED: Handle multiple screenshots with proper null checking
+    static async submitEvent(interaction, eventType, description, screenshots, quantity = 1, attendeesPassed = 0) {
         try {
             // Step 1: Check permissions
             if (!PermissionChecker.canSubmitLogs(interaction.member)) {
@@ -19,11 +19,37 @@ class EventController {
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            // Step 2: Validate screenshot
-            if (!screenshot.contentType?.startsWith('image/')) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed('Please provide a valid image screenshot!');
+            // Step 2: FIXED - Validate screenshots with proper null checking
+            if (!screenshots || screenshots.length === 0) {
+                const errorEmbed = SWATEmbeds.createErrorEmbed('At least one screenshot is required!');
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
+
+            if (screenshots.length > 3) {
+                const errorEmbed = SWATEmbeds.createErrorEmbed('Maximum 3 screenshots allowed!');
+                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+
+            // FIXED: Validate each screenshot with null checking
+            for (let i = 0; i < screenshots.length; i++) {
+                const screenshot = screenshots[i];
+                
+                // Check if screenshot exists and is not null
+                if (!screenshot) {
+                    const errorEmbed = SWATEmbeds.createErrorEmbed(`Screenshot ${i + 1} is missing or invalid!`);
+                    return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+                }
+                
+                // Check if screenshot has contentType and is an image
+                if (!screenshot.contentType || !screenshot.contentType.startsWith('image/')) {
+                    const errorEmbed = SWATEmbeds.createErrorEmbed(`Screenshot ${i + 1} must be a valid image file!`);
+                    return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+                }
+                
+                console.log(`✅ Screenshot ${i + 1} validated: ${screenshot.name} (${screenshot.contentType})`);
+            }
+
+            console.log(`📸 All ${screenshots.length} screenshots validated successfully`);
 
             // Step 3: Validate inputs
             if (quantity < 1 || quantity > 20) {
@@ -45,7 +71,6 @@ class EventController {
                     discordId: interaction.user.id,
                     username: interaction.member.displayName || interaction.user.username,
                     isBooster: PermissionChecker.isBooster(interaction.member),
-                    // Rank system defaults are set in schema
                     rankName: 'Probationary Operator',
                     rankLevel: 1,
                     rankPoints: 0
@@ -55,24 +80,18 @@ class EventController {
                 user.isBooster = PermissionChecker.isBooster(interaction.member);
             }
 
-            // Step 5: Calculate points (both leaderboard and rank points)
+            // Step 5: Calculate points
             const isBooster = PermissionChecker.isBooster(interaction.member);
             const basePointsPerEvent = PointCalculator.calculateBasePoints(eventType);
             
-            // Calculate bonus points from attendees (only for tryouts)
             const isTryoutEvent = eventType === 'tet_private' || eventType === 'tet_public';
             const attendeesBonus = isTryoutEvent ? attendeesPassed : 0;
             
-            // Points per event = base points + attendees bonus
             const pointsPerEventWithBonus = basePointsPerEvent + attendeesBonus;
-            
-            // Apply booster multiplier to the total (base + bonus)
             const actualPointsPerEvent = isBooster ? pointsPerEventWithBonus * 2 : pointsPerEventWithBonus;
-            
-            // Multiply by quantity for total points
             const totalPoints = actualPointsPerEvent * quantity;
 
-            // FIXED: Step 6 - Update points (unified system)
+            // Step 6: Update user points and stats
             const oldWeeklyPoints = user.weeklyPoints;
             const oldAllTimePoints = user.allTimePoints;
             const oldRankPoints = user.rankPoints;
@@ -82,33 +101,27 @@ class EventController {
             user.totalEvents += quantity;
             user.weeklyEvents += quantity;
 
-            // FIXED: Step 7 - Update rank points (unified with point system)
-            // Only track rank points if user is not at Executive+ level (hand-picked ranks)
+            // Update rank points (only for non-Executive ranks)
             if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
                 user.rankPoints += totalPoints;
                 console.log(`📈 Rank progression: ${user.username} gained ${totalPoints} rank points (${oldRankPoints} → ${user.rankPoints})`);
-            } else {
-                console.log(`👑 Executive rank: ${user.username} - rank points not tracked for hand-picked ranks`);
             }
 
-            // FIXED: Step 8 - Update quota status using rank-based quota system
+            // Update quota status
             const currentQuota = QuotaSystem.getUserQuota(user);
             user.weeklyQuota = currentQuota;
             user.quotaCompleted = QuotaSystem.isQuotaCompleted(user);
 
-            // FIXED: Step 9 - Check for promotion eligibility after point updates
+            // Check promotion eligibility
             const eligibilityBefore = user.promotionEligible;
             const eligibilityCheck = RankSystem.checkPromotionEligibility(user);
             user.promotionEligible = eligibilityCheck.eligible;
 
-            // Log promotion eligibility changes
             if (!eligibilityBefore && eligibilityCheck.eligible) {
                 console.log(`🎯 PROMOTION ELIGIBLE: ${user.username} is now eligible for promotion to ${eligibilityCheck.nextRank?.name}`);
-            } else if (eligibilityBefore && !eligibilityCheck.eligible) {
-                console.log(`⚠️ PROMOTION LOST: ${user.username} is no longer eligible (${eligibilityCheck.reason})`);
             }
 
-            // Step 10: Daily points tracking (existing feature)
+            // Daily points tracking
             const now = new Date();
             const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -119,7 +132,7 @@ class EventController {
                 user.dailyPointsToday = (user.dailyPointsToday || 0) + totalPoints;
             }
 
-            // Step 11: Update rank tracking for trends
+            // Update rank tracking for trends
             if (!user.previousRank || user.previousRank === 0) {
                 const currentRank = await SWATUser.countDocuments({ 
                     weeklyPoints: { $gt: oldWeeklyPoints }
@@ -127,7 +140,7 @@ class EventController {
                 user.previousRank = currentRank;
             }
 
-            // Step 12: Update quota streak tracking
+            // Update quota streak tracking
             if (user.quotaCompleted && !user.lastQuotaCompletion) {
                 user.lastQuotaCompletion = now;
                 user.quotaStreak = (user.quotaStreak || 0) + 1;
@@ -135,11 +148,53 @@ class EventController {
 
             await user.save();
 
-            // FIXED: Step 13 - Enhanced promotion eligibility check
+            // Step 7: Create event log with multiple screenshots
+            const enhancedDescription = isTryoutEvent && attendeesPassed > 0 
+                ? `${description} (${attendeesPassed} attendees passed)`
+                : description;
+                
+            const finalDescription = quantity > 1 
+                ? `${enhancedDescription} (x${quantity})` 
+                : enhancedDescription;
+
+            // FIXED: Extract screenshot URLs safely
+            const screenshotUrls = screenshots.map(screenshot => screenshot.url);
+            
+            console.log(`💾 Saving event with ${screenshotUrls.length} screenshot URLs:`, screenshotUrls);
+
+            const eventLog = new EventLog({
+                userId: interaction.user.id,
+                username: interaction.member.displayName || interaction.user.username,
+                eventType,
+                description: finalDescription,
+                pointsAwarded: totalPoints,
+                boostedPoints: isBooster,
+                // NEW: Store multiple screenshot URLs
+                screenshotUrls: screenshotUrls,
+                // BACKWARD COMPATIBILITY: Also store first screenshot in old field
+                screenshotUrl: screenshotUrls[0],
+                quantity: quantity
+            });
+
+            if (isTryoutEvent) {
+                eventLog.attendeesPassed = attendeesPassed;
+            }
+
+            await eventLog.save();
+            console.log(`✅ Event saved successfully with ${screenshotUrls.length} screenshots`);
+
+            // Step 8: Create response embed with multiple screenshots info
+            const embed = this.createEnhancedSubmissionEmbed(
+                user, eventType, description, totalPoints, basePointsPerEvent, 
+                isBooster, screenshots, quantity, attendeesPassed, attendeesBonus
+            );
+
+            await interaction.editReply({ embeds: [embed] });
+
+            // Step 9: Send promotion notification if user became eligible
             let promotionResult = null;
             try {
                 if (eligibilityCheck.eligible && !eligibilityBefore) {
-                    // User just became eligible - create promotion result
                     promotionResult = {
                         newlyEligible: true,
                         user: user,
@@ -150,45 +205,8 @@ class EventController {
                 }
             } catch (error) {
                 console.error('❌ Promotion eligibility check error:', error);
-                // Don't fail the entire submission if promotion check fails
             }
 
-            // Step 14: Create enhanced event log
-            const enhancedDescription = isTryoutEvent && attendeesPassed > 0 
-                ? `${description} (${attendeesPassed} attendees passed)`
-                : description;
-                
-            const finalDescription = quantity > 1 
-                ? `${enhancedDescription} (x${quantity})` 
-                : enhancedDescription;
-
-            const eventLog = new EventLog({
-                userId: interaction.user.id,
-                username: interaction.member.displayName || interaction.user.username,
-                eventType,
-                description: finalDescription,
-                pointsAwarded: totalPoints,
-                boostedPoints: isBooster,
-                screenshotUrl: screenshot.url,
-                quantity: quantity
-            });
-
-            // Add attendees data if it's a tryout
-            if (isTryoutEvent) {
-                eventLog.attendeesPassed = attendeesPassed;
-            }
-
-            await eventLog.save();
-
-            // Step 15: Create response embed with enhanced rank information
-            const embed = this.createEnhancedSubmissionEmbed(
-                user, eventType, description, totalPoints, basePointsPerEvent, 
-                isBooster, screenshot, quantity, attendeesPassed, attendeesBonus
-            );
-
-            await interaction.editReply({ embeds: [embed] });
-
-            // FIXED: Step 16 - Send promotion notification if user became eligible
             if (promotionResult && promotionResult.newlyEligible) {
                 try {
                     const promoNotification = PromotionChecker.createEligibilityNotification(promotionResult);
@@ -200,7 +218,6 @@ class EventController {
                             .addFields(promoNotification.fields)
                             .setTimestamp();
 
-                        // Send as follow-up message to user
                         await interaction.followUp({ 
                             embeds: [promoEmbed], 
                             ephemeral: true 
@@ -213,10 +230,11 @@ class EventController {
                 }
             }
 
-            // Enhanced logging with detailed point tracking
+            // Enhanced logging with screenshot count
             console.log(`📊 Event submitted by ${user.username}:`);
             console.log(`   - Event: ${eventType} x${quantity}`);
             console.log(`   - Points awarded: ${totalPoints}`);
+            console.log(`   - Screenshots: ${screenshots.length} attached`);
             console.log(`   - Weekly points: ${oldWeeklyPoints} → ${user.weeklyPoints}`);
             console.log(`   - All-time points: ${oldAllTimePoints} → ${user.allTimePoints}`);
             console.log(`   - Rank points: ${oldRankPoints} → ${user.rankPoints}`);
@@ -239,15 +257,16 @@ class EventController {
         }
     }
 
-    // ENHANCED: Create enhanced submission embed with detailed rank progression
-    static createEnhancedSubmissionEmbed(user, eventType, description, totalPoints, basePoints, isBooster, screenshot, quantity, attendeesPassed, attendeesBonus) {
+    // Create enhanced submission embed with multiple screenshots info
+    static createEnhancedSubmissionEmbed(user, eventType, description, totalPoints, basePoints, isBooster, screenshots, quantity, attendeesPassed, attendeesBonus) {
         const isTryoutEvent = attendeesPassed > 0;
         
         const embed = new EmbedBuilder()
             .setColor(user.quotaCompleted ? '#00ff00' : '#ffa500')
             .setTitle('✅ Event(s) Submitted Successfully!')
             .setDescription(`**${PointCalculator.getEventName(eventType)}** ${quantity > 1 ? `(x${quantity})` : ''}`)
-            .setThumbnail(screenshot.url)
+            // Use first screenshot as thumbnail
+            .setThumbnail(screenshots[0].url)
             .setTimestamp();
 
         // Build detailed points explanation
@@ -274,7 +293,7 @@ class EventController {
             }
         }
 
-        // ENHANCED: Add rank progression info with better details
+        // Add rank progression info
         const rankProgress = RankSystem.createRankProgressBar(user);
         const currentRank = RankSystem.formatRank(user);
         const eligibility = RankSystem.checkPromotionEligibility(user);
@@ -299,10 +318,16 @@ class EventController {
                 name: '🎖️ Current Rank',
                 value: currentRank,
                 inline: true
+            },
+            // Add screenshot count info
+            {
+                name: '📸 Screenshots',
+                value: `${screenshots.length} image${screenshots.length > 1 ? 's' : ''} attached`,
+                inline: true
             }
         );
 
-        // ENHANCED: Add rank progression (only for non-Executive ranks)
+        // Add rank progression (only for non-Executive ranks)
         if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
             embed.addFields({
                 name: '📈 Rank Progress',
@@ -363,7 +388,7 @@ class EventController {
             embed.setDescription(embed.data.description + '\n\n🎉 **Congratulations! You\'ve completed your weekly quota!**');
         }
 
-        // ENHANCED: Add promotion notification
+        // Add promotion notification
         if (eligibility.eligible && !user.promotionEligible) {
             embed.setDescription(embed.data.description + '\n\n🎯 **You\'re now eligible for promotion! HR has been notified.**');
         }

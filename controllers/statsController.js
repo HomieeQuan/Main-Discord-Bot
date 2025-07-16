@@ -1,10 +1,10 @@
-// controllers/statsController.js
+// controllers/statsController.js - FIXED rank lock display and removed medal emoji
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const SWATEmbeds = require('../views/embedBuilder');
 
 class StatsController {
-    // Handles when someone checks their personal stats
+    // FIXED: Personal stats now shows rank lock properly
     static async getPersonalStats(interaction) {
         try {
             // Find user in database
@@ -31,13 +31,14 @@ class StatsController {
                 .sort({ submittedAt: -1 })  // Most recent first
                 .limit(5);
 
-            // Create stats embed
+            // FIXED: Create stats embed with rank lock support
             const statsEmbed = SWATEmbeds.createPersonalStatsEmbed(
                 user, 
                 interaction.user, 
                 weeklyRank, 
                 allTimeRank, 
-                recentEvents
+                recentEvents,
+                true  // NEW: isPersonalStats flag
             );
 
             await interaction.reply({ embeds: [statsEmbed] });
@@ -54,7 +55,7 @@ class StatsController {
         }
     }
 
-    // Handles when someone checks another user's stats (for HR)
+    // FIXED: User stats for HR viewing (also shows rank lock consistently)
     static async getUserStats(interaction, targetUser) {
         try {
             // Check if user has permission to view other stats (HR only for now)
@@ -86,13 +87,14 @@ class StatsController {
                 .sort({ submittedAt: -1 })
                 .limit(5);
 
-            // Create stats embed
+            // FIXED: Create stats embed with rank lock support
             const statsEmbed = SWATEmbeds.createPersonalStatsEmbed(
                 user, 
                 targetUser, 
                 weeklyRank, 
                 allTimeRank, 
-                recentEvents
+                recentEvents,
+                false  // NEW: isPersonalStats flag (false for HR viewing others)
             );
 
             await interaction.reply({ embeds: [statsEmbed] });

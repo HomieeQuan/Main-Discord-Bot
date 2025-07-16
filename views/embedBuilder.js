@@ -1,10 +1,10 @@
-// views/embedBuilder.js - Enhanced with rank system integration and CLEAN leaderboard
+// views/embedBuilder.js - FIXED rank lock display and removed medal emoji
 const { EmbedBuilder } = require('discord.js');
 const PointCalculator = require('../utils/pointCalculator');
 
 class SWATEmbeds {
-    // Enhanced personal stats with rank progression
-    static createPersonalStatsEmbed(user, discordUser, weeklyRank, allTimeRank, recentEvents = []) {
+    // FIXED: Enhanced personal stats with consistent rank lock display
+    static createPersonalStatsEmbed(user, discordUser, weeklyRank, allTimeRank, recentEvents = [], isPersonalStats = true) {
         try {
             const RankSystem = require('../utils/rankSystem');
             const ProgressBarGenerator = require('../utils/progressBar');
@@ -14,49 +14,49 @@ class SWATEmbeds {
                 .setTitle(`📊 ${user.username}'s SWAT Statistics`)
                 .setThumbnail(discordUser.displayAvatarURL());
 
-            // Current rank display
+            // FIXED: Current rank display WITHOUT medal emoji
             const currentRank = RankSystem.formatRank(user);
             embed.addFields({
-                name: '🎖️ Current Rank',
+                name: 'Current Rank',
                 value: currentRank,
                 inline: true
             });
 
-            // Rank progression (only for non-Executive ranks)
-            if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
-                const rankProgress = RankSystem.createRankProgressBar(user);
-                embed.addFields({
-                    name: '📈 Rank Progress',
-                    value: rankProgress,
-                    inline: false
-                });
-            } else {
-                embed.addFields({
-                    name: '👑 Executive Status',
-                    value: 'Hand-picked rank - no point requirements',
-                    inline: true
-                });
-            }
-
-            // Rank lock status
+            // FIXED: Rank lock status (now shows for both personal and HR views)
             const lockStatus = RankSystem.checkRankLockExpiry(user);
             if (!lockStatus.expired && lockStatus.daysRemaining) {
                 embed.addFields({
-                    name: '🔒 Rank Lock',
+                    name: 'Rank Lock',
                     value: `${lockStatus.daysRemaining} days remaining`,
                     inline: true
                 });
-            } else if (lockStatus.expired) {
+            } else if (lockStatus.expired || !user.rankLockUntil) {
                 embed.addFields({
-                    name: '🔓 Rank Status',
+                    name: 'Rank Status',
                     value: 'Available for promotion',
                     inline: true
                 });
             }
 
+            // Rank progression (only for non-Executive ranks)
+            if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
+                const rankProgress = RankSystem.createRankProgressBar(user);
+                embed.addFields({
+                    name: 'Rank Progress',
+                    value: rankProgress,
+                    inline: false
+                });
+            } else {
+                embed.addFields({
+                    name: 'Executive Status',
+                    value: 'Hand-picked rank - no point requirements',
+                    inline: false
+                });
+            }
+
             // Weekly quota progress
             embed.addFields({
-                name: '🎯 Weekly Quota Progress',
+                name: 'Weekly Quota Progress',
                 value: ProgressBarGenerator.createQuotaProgressBar(user.weeklyPoints, user.weeklyQuota),
                 inline: false
             });
@@ -64,32 +64,32 @@ class SWATEmbeds {
             // Performance stats
             embed.addFields(
                 { 
-                    name: '🏆 Weekly Rank', 
+                    name: 'Weekly Rank', 
                     value: `#${weeklyRank}`, 
                     inline: true 
                 },
                 { 
-                    name: '⭐ All-Time Points', 
+                    name: 'All-Time Points', 
                     value: `${user.allTimePoints} points`, 
                     inline: true 
                 },
                 { 
-                    name: '🏅 All-Time Rank', 
+                    name: 'All-Time Rank', 
                     value: `#${allTimeRank}`, 
                     inline: true 
                 },
                 { 
-                    name: '📈 Events This Week', 
+                    name: 'Events This Week', 
                     value: `${user.weeklyEvents} events`, 
                     inline: true 
                 },
                 { 
-                    name: '🔥 Points Today', 
+                    name: 'Points Today', 
                     value: `${user.dailyPointsToday || 0} points`, 
                     inline: true 
                 },
                 { 
-                    name: '📊 Total Events', 
+                    name: 'Total Events', 
                     value: `${user.totalEvents} events`, 
                     inline: true 
                 }
@@ -100,7 +100,7 @@ class SWATEmbeds {
                 const eligibility = RankSystem.checkPromotionEligibility(user);
                 if (eligibility.eligible && eligibility.nextRank) {
                     embed.addFields({
-                        name: '🎯 Promotion Available!',
+                        name: 'Promotion Available!',
                         value: `Eligible for promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}**! Contact HR for review.`,
                         inline: false
                     });
@@ -128,7 +128,7 @@ class SWATEmbeds {
                     .join('\n');
                 
                 embed.addFields({ 
-                    name: '📋 Recent Events (Last 5)', 
+                    name: 'Recent Events (Last 5)', 
                     value: recentEventsText, 
                     inline: false 
                 });
@@ -143,7 +143,7 @@ class SWATEmbeds {
         }
     }
 
-    // FIXED: CLEAN MINIMAL LEADERBOARD - No trophy spam, simple design
+    // FIXED: Clean minimal leaderboard - No trophy spam, simple design
     static async createEnhancedLeaderboardEmbed(users, type = 'weekly', enhancedStats = null) {
         try {
             const RankSystem = require('../utils/rankSystem');
@@ -226,9 +226,10 @@ class SWATEmbeds {
         }
     }
 
-    // Fallback basic personal stats embed (in case rank system fails)
+    // FIXED: Fallback basic personal stats embed with rank lock support
     static createBasicPersonalStatsEmbed(user, discordUser, weeklyRank, allTimeRank, recentEvents = []) {
         const ProgressBarGenerator = require('../utils/progressBar');
+        const RankSystem = require('../utils/rankSystem');
         
         const embed = new EmbedBuilder()
             .setColor(user.quotaCompleted ? '#00ff00' : '#ffa500')
@@ -236,42 +237,59 @@ class SWATEmbeds {
             .setThumbnail(discordUser.displayAvatarURL())
             .addFields(
                 { 
-                    name: '🎯 Weekly Quota Progress', 
+                    name: 'Weekly Quota Progress', 
                     value: ProgressBarGenerator.createQuotaProgressBar(user.weeklyPoints, user.weeklyQuota), 
                     inline: false 
                 },
                 { 
-                    name: '🏆 Weekly Rank', 
+                    name: 'Weekly Rank', 
                     value: `#${weeklyRank}`, 
                     inline: true 
                 },
                 { 
-                    name: '⭐ All-Time Points', 
+                    name: 'All-Time Points', 
                     value: `${user.allTimePoints} points`, 
                     inline: true 
                 },
                 { 
-                    name: '🏅 All-Time Rank', 
+                    name: 'All-Time Rank', 
                     value: `#${allTimeRank}`, 
                     inline: true 
                 },
                 { 
-                    name: '📈 Events This Week', 
+                    name: 'Events This Week', 
                     value: `${user.weeklyEvents} events`, 
                     inline: true 
                 },
                 { 
-                    name: '🔥 Points Today', 
+                    name: 'Points Today', 
                     value: `${user.dailyPointsToday || 0} points`, 
                     inline: true 
                 },
                 { 
-                    name: '📊 Total Events', 
+                    name: 'Total Events', 
                     value: `${user.totalEvents} events`, 
                     inline: true 
                 }
-            )
-            .setFooter({ 
+            );
+
+        // FIXED: Add rank lock status in fallback too
+        const lockStatus = RankSystem.checkRankLockExpiry(user);
+        if (!lockStatus.expired && lockStatus.daysRemaining) {
+            embed.addFields({
+                name: 'Rank Lock',
+                value: `${lockStatus.daysRemaining} days remaining`,
+                inline: true
+            });
+        } else if (lockStatus.expired || !user.rankLockUntil) {
+            embed.addFields({
+                name: 'Rank Status',
+                value: 'Available for promotion',
+                inline: true
+            });
+        }
+
+        embed.setFooter({ 
                 text: user.isBooster ? 'Server Booster (2x Points) 💎' : 'Standard Points' 
             })
             .setTimestamp();
@@ -282,7 +300,7 @@ class SWATEmbeds {
                 .join('\n');
             
             embed.addFields({ 
-                name: '📋 Recent Events (Last 5)', 
+                name: 'Recent Events (Last 5)', 
                 value: recentEventsText, 
                 inline: false 
             });
@@ -291,7 +309,7 @@ class SWATEmbeds {
         return embed;
     }
 
-    // FIXED: Clean basic leaderboard embed
+    // FIXED: Clean basic leaderboard embed without medal emoji
     static createBasicLeaderboardEmbed(users, type = 'weekly') {
         const RankSystem = require('../utils/rankSystem');
         
