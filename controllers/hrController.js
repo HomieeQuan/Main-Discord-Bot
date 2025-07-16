@@ -569,6 +569,351 @@ class HRController {
             }
         }
     }
+
+    // Addition to controllers/hrController.js - Add this method to the HRController class
+
+    // NEW: Comprehensive audit data compilation for the /audit-user command
+    static async compileAuditData(targetUserId, days = 7) {
+        try {
+            console.log(`📊 Compiling comprehensive audit data for user ${targetUserId}...`);
+            
+            // Get user data
+            const user = await SWATUser.findOne({ discordId: targetUserId });
+            if (!user) {
+                return { success: false, error: 'User not found in database' };
+            }
+
+            // Date range for audit
+            const dateLimit = new Date();
+            dateLimit.setDate(dateLimit.getDate() - days);
+
+            // Get all events in range with detailed filtering
+            const allEvents = await EventLog.find({
+                userId: targetUserId,
+                submittedAt: { $gte: dateLimit }
+            }).sort({ submittedAt: -1 });
+
+            // Categorize events
+            const userEvents = allEvents.filter(event => 
+                !event.eventType.startsWith('hr_') && 
+                !event.eventType.startsWith('automation_') &&
+                event.eventType !== 'booster_status_change'
+            );
+
+            const hrEvents = allEvents.filter(event => 
+                event.eventType.startsWith('hr_') || 
+                event.eventType === 'promotion' ||
+                event.eventType === 'force_promotion'
+            );
+
+            const systemEvents = allEvents.filter(event => 
+                event.eventType.startsWith('automation_') ||
+                event.eventType === 'booster_status_change' ||
+                event.eventType === 'daily_automation'
+            );
+
+            // Calculate comprehensive statistics
+            const stats = this.calculateComprehensiveStats(userEvents, user, days);
+            
+            // Performance analysis
+            const performance = this.analyzeUserPerformance(userEvents, user);
+            
+            // Risk assessment
+            const risks = this.assessUserRisks(userEvents, user, days);
+            
+            // Trend analysis
+            const trends = this.analyzeTrends(userEvents);
+
+            console.log(`✅ Audit data compiled: ${allEvents.length} total events, ${userEvents.length} user events`);
+
+            return {
+                success: true,
+                data: {
+                    user,
+                    events: {
+                        all: allEvents,
+                        user: userEvents,
+                        hr: hrEvents,
+                        system: systemEvents
+                    },
+                    statistics: stats,
+                    performance,
+                    risks,
+                    trends,
+                    auditPeriod: {
+                        days,
+                        startDate: dateLimit,
+                        endDate: new Date()
+                    }
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ Audit data compilation error:', error);
+            return { 
+                success: false, 
+                error: error.message 
+            };
+        }
+    }
+
+    // Calculate comprehensive statistics for audit
+    static calculateComprehensiveStats(events, user, days) {
+        const totalEvents = events.length;
+        const totalPoints = events.reduce((sum, event) => sum + event.pointsAwarded, 0);
+        const boostedEvents = events.filter(e => e.boostedPoints).length;
+        const eventsWithScreenshots = events.filter(e => 
+            e.screenshotUrl && 
+            !e.screenshotUrl.startsWith('HR_') && 
+            !e.screenshotUrl.startsWith('SYSTEM_')
+        ).length;
+
+        // Daily breakdown
+        const dailyStats = {};
+        events.forEach(event => {
+            const date = event.submittedAt.toLocaleDateString();
+            if (!dailyStats[date]) {
+                dailyStats[date] = { events: 0, points: 0 };
+            }
+            dailyStats[date].events += event.quantity || 1;
+            dailyStats[date].points += event.pointsAwarded;
+        });
+
+        const activeDays = Object.keys(dailyStats).length;
+        const avgEventsPerDay = activeDays > 0 ? (totalEvents / activeDays).toFixed(1) : 0;
+        const avgPointsPerDay = activeDays > 0 ? (totalPoints / activeDays).toFixed(1) : 0;
+
+        // Event type analysis
+        const eventTypes = {};
+        events.forEach(event => {
+            const PointCalculator = require('../utils/pointCalculator');
+            const eventName = PointCalculator.getEventName(event.eventType);
+            if (!eventTypes[eventName]) {
+                eventTypes[eventName] = { count: 0, points: 0 };
+            }
+            eventTypes[eventName].count += event.quantity || 1;
+            eventTypes[eventName].points += event.pointsAwarded;
+        });
+
+        return {
+            overview: {
+                totalEvents,
+                totalPoints,
+                boostedEvents,
+                eventsWithScreenshots,
+                screenshotCompliance: totalEvents > 0 ? 
+                    Math.round((eventsWithScreenshots / totalEvents) * 100) : 0
+            },
+            activity: {
+                activeDays,
+                totalDays: days,
+                activityRate: Math.round((activeDays / days) * 100),
+                avgEventsPerDay,
+                avgPointsPerDay
+            },
+            eventTypes,
+            dailyStats
+        };
+    }
+
+    // Analyze user performance metrics
+    static analyzeUserPerformance(events, user) {
+        if (events.length === 0) {
+            return {
+                score: 0,
+                category: 'Inactive',
+                strengths: [],
+                improvements: ['Submit events regularly']
+            };
+        }
+
+        const RankSystem = require('../utils/rankSystem');
+        const totalPoints = events.reduce((sum, e) => sum + e.pointsAwarded, 0);
+        const avgPointsPerEvent = totalPoints / events.length;
+        
+        // Performance scoring (0-100)
+        let score = 0;
+        const strengths = [];
+        const improvements = [];
+
+        // Activity score (40 points max)
+        const activityScore = Math.min(40, events.length * 3);
+        score += activityScore;
+        
+        if (events.length >= 10) {
+            strengths.push('High activity level');
+        } else if (events.length < 3) {
+            improvements.push('Increase event submission frequency');
+        }
+
+        // Point efficiency score (30 points max)
+        const efficiencyScore = Math.min(30, avgPointsPerEvent * 7);
+        score += efficiencyScore;
+        
+        if (avgPointsPerEvent >= 3.5) {
+            strengths.push('High-value event focus');
+        } else if (avgPointsPerEvent < 2) {
+            improvements.push('Focus on higher-point events');
+        }
+
+        // Consistency score (20 points max)
+        const activeDays = new Set(events.map(e => e.submittedAt.toLocaleDateString())).size;
+        const consistencyScore = Math.min(20, activeDays * 3);
+        score += consistencyScore;
+        
+        if (activeDays >= 5) {
+            strengths.push('Consistent daily activity');
+        } else if (activeDays < 3) {
+            improvements.push('Maintain daily consistency');
+        }
+
+        // Quota performance (10 points max)
+        const quotaScore = user.quotaCompleted ? 10 : Math.min(10, (user.weeklyPoints / user.weeklyQuota) * 10);
+        score += quotaScore;
+        
+        if (user.quotaCompleted) {
+            strengths.push('Weekly quota completed');
+        } else {
+            improvements.push('Complete weekly quota');
+        }
+
+        // Performance category
+        let category;
+        if (score >= 80) category = 'Excellent';
+        else if (score >= 60) category = 'Good';
+        else if (score >= 40) category = 'Average';
+        else if (score >= 20) category = 'Below Average';
+        else category = 'Needs Improvement';
+
+        return {
+            score: Math.round(score),
+            category,
+            strengths,
+            improvements,
+            metrics: {
+                activity: Math.round(activityScore),
+                efficiency: Math.round(efficiencyScore),
+                consistency: Math.round(consistencyScore),
+                quota: Math.round(quotaScore)
+            }
+        };
+    }
+
+    // Assess user risks for audit
+    static assessUserRisks(events, user, days) {
+        const risks = [];
+        const warnings = [];
+        
+        // Low activity risk
+        if (events.length < days * 0.3) {
+            risks.push({
+                level: 'HIGH',
+                type: 'Low Activity',
+                description: `Only ${events.length} events in ${days} days`,
+                recommendation: 'Increase daily event submissions'
+            });
+        }
+
+        // Quota completion risk
+        if (!user.quotaCompleted) {
+            const weekProgress = (new Date().getDay() || 7) / 7; // Progress through current week
+            const expectedProgress = user.weeklyQuota * weekProgress;
+            
+            if (user.weeklyPoints < expectedProgress * 0.7) {
+                warnings.push({
+                    level: 'MEDIUM',
+                    type: 'Quota Risk',
+                    description: 'Behind expected quota progress',
+                    recommendation: 'Focus on completing weekly quota'
+                });
+            }
+        }
+
+        // Screenshot compliance risk
+        const eventsWithScreenshots = events.filter(e => 
+            e.screenshotUrl && !e.screenshotUrl.startsWith('HR_')
+        ).length;
+        const screenshotRate = events.length > 0 ? (eventsWithScreenshots / events.length) : 0;
+        
+        if (screenshotRate < 0.9 && events.length > 2) {
+            warnings.push({
+                level: 'MEDIUM',
+                type: 'Screenshot Compliance',
+                description: `${Math.round(screenshotRate * 100)}% screenshot compliance`,
+                recommendation: 'Ensure all events include valid screenshots'
+            });
+        }
+
+        // Performance trend risk
+        if (events.length >= 6) {
+            const recent = events.slice(0, Math.floor(events.length / 2));
+            const older = events.slice(Math.floor(events.length / 2));
+            const recentAvg = recent.reduce((sum, e) => sum + e.pointsAwarded, 0) / recent.length;
+            const olderAvg = older.reduce((sum, e) => sum + e.pointsAwarded, 0) / older.length;
+            
+            if (recentAvg < olderAvg * 0.8) {
+                risks.push({
+                    level: 'HIGH',
+                    type: 'Performance Decline',
+                    description: 'Significant drop in recent performance',
+                    recommendation: 'Review recent activity and identify improvement areas'
+                });
+            }
+        }
+
+        return {
+            riskLevel: risks.length > 0 ? 'HIGH' : warnings.length > 0 ? 'MEDIUM' : 'LOW',
+            risks,
+            warnings,
+            summary: risks.length === 0 && warnings.length === 0 ? 
+                'No significant risks identified' : 
+                `${risks.length} risks, ${warnings.length} warnings`
+        };
+    }
+
+    // Analyze trends for audit
+    static analyzeTrends(events) {
+        if (events.length < 3) {
+            return {
+                activity: 'insufficient_data',
+                points: 'insufficient_data',
+                efficiency: 'insufficient_data'
+            };
+        }
+
+        // Sort events chronologically
+        const sortedEvents = events.sort((a, b) => a.submittedAt - b.submittedAt);
+        
+        // Split into periods for trend analysis
+        const third = Math.floor(sortedEvents.length / 3);
+        const early = sortedEvents.slice(0, third);
+        const middle = sortedEvents.slice(third, third * 2);
+        const recent = sortedEvents.slice(third * 2);
+
+        // Calculate averages for each period
+        const earlyAvg = early.reduce((sum, e) => sum + e.pointsAwarded, 0) / early.length;
+        const middleAvg = middle.reduce((sum, e) => sum + e.pointsAwarded, 0) / middle.length;
+        const recentAvg = recent.reduce((sum, e) => sum + e.pointsAwarded, 0) / recent.length;
+
+        // Determine trends
+        const pointsTrend = recentAvg > earlyAvg * 1.1 ? 'improving' : 
+                           recentAvg < earlyAvg * 0.9 ? 'declining' : 'stable';
+
+        const activityTrend = recent.length > early.length ? 'increasing' : 
+                             recent.length < early.length ? 'decreasing' : 'stable';
+
+        return {
+            activity: activityTrend,
+            points: pointsTrend,
+            efficiency: recentAvg > earlyAvg ? 'improving' : 
+                       recentAvg < earlyAvg ? 'declining' : 'stable',
+            data: {
+                early: { events: early.length, avgPoints: earlyAvg.toFixed(1) },
+                middle: { events: middle.length, avgPoints: middleAvg.toFixed(1) },
+                recent: { events: recent.length, avgPoints: recentAvg.toFixed(1) }
+            }
+        };
+    }
 }
 
 module.exports = HRController;
