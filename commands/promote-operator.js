@@ -1,4 +1,4 @@
-// commands/promote-operator.js - FIXED username display to use server nicknames
+// commands/promote-operator.js - FIXED force promotion rank lock bug
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
@@ -178,7 +178,7 @@ module.exports = {
             
             const embed = new EmbedBuilder()
                 .setColor(eligibility.eligible ? '#00ff00' : '#ffaa00')
-                .setTitle(`🎖️ Promotion Review - ${user.username}`) // FIXED: Uses server nickname from database
+                .setTitle(`🎖️ Promotion Review - ${user.username}`)
                 .setThumbnail(targetUser.displayAvatarURL())
                 .addFields(
                     { 
@@ -253,13 +253,13 @@ module.exports = {
             if (eligibility.eligible) {
                 embed.addFields({
                     name: '🔧 HR Actions',
-                    value: `\`/promote-operator approve user:${user.username}\`\n\`/promote-operator deny user:${user.username} reason:[reason]\``, // FIXED: Uses server nickname
+                    value: `\`/promote-operator approve user:${user.username}\`\n\`/promote-operator deny user:${user.username} reason:[reason]\``,
                     inline: false
                 });
             } else if (lockStatus.daysRemaining) {
                 embed.addFields({
                     name: '🔧 HR Actions',
-                    value: `\`/promote-operator bypass-lock user:${user.username} reason:[reason]\` - Remove rank lock`, // FIXED: Uses server nickname
+                    value: `\`/promote-operator bypass-lock user:${user.username} reason:[reason]\` - Remove rank lock`,
                     inline: false
                 });
             }
@@ -293,7 +293,7 @@ module.exports = {
                 const errorEmbed = new EmbedBuilder()
                     .setColor('#ff0000')
                     .setTitle('❌ Promotion Not Approved')
-                    .setDescription(`${user.username} is not eligible for promotion.`) // FIXED: Uses server nickname
+                    .setDescription(`${user.username} is not eligible for promotion.`)
                     .addFields({
                         name: '❌ Reason',
                         value: eligibility.reason,
@@ -320,7 +320,7 @@ module.exports = {
             const successEmbed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('🎉 Promotion Approved!')
-                .setDescription(`**${user.username}** has been successfully promoted!`) // FIXED: Uses server nickname
+                .setDescription(`**${user.username}** has been successfully promoted!`)
                 .setThumbnail(targetUser.displayAvatarURL())
                 .addFields(
                     { 
@@ -423,7 +423,7 @@ module.exports = {
             // Create audit log
             const auditLog = new EventLog({
                 userId: targetUser.id,
-                username: user.username, // FIXED: Uses server nickname from database
+                username: user.username,
                 eventType: 'promotion_denied',
                 description: `PROMOTION DENIED by HR - Reason: ${reason}`,
                 pointsAwarded: 0,
@@ -444,11 +444,11 @@ module.exports = {
             const denialEmbed = new EmbedBuilder()
                 .setColor('#ff6600')
                 .setTitle('❌ Promotion Denied')
-                .setDescription(`Promotion denied for **${user.username}**`) // FIXED: Uses server nickname
+                .setDescription(`Promotion denied for **${user.username}**`)
                 .addFields(
                     { 
                         name: '👤 User', 
-                        value: user.username, // FIXED: Uses server nickname
+                        value: user.username,
                         inline: true 
                     },
                     { 
@@ -517,7 +517,7 @@ module.exports = {
                 const currentRankEmoji = RankSystem.getRankEmoji(RankSystem.getRankByName(user.currentRank).level);
                 const nextRankEmoji = RankSystem.getRankEmoji(RankSystem.getRankByName(user.nextRank).level);
                 
-                return `• **${user.username}**: ${currentRankEmoji} ${user.currentRank} → ${nextRankEmoji} ${user.nextRank}\n  └ Points: ${user.rankPoints} | All-time: ${user.allTimePoints}`; // FIXED: Uses server nickname
+                return `• **${user.username}**: ${currentRankEmoji} ${user.currentRank} → ${nextRankEmoji} ${user.nextRank}\n  └ Points: ${user.rankPoints} | All-time: ${user.allTimePoints}`;
             }).join('\n\n');
 
             embed.addFields({
@@ -562,6 +562,7 @@ module.exports = {
         }
     },
 
+    // 🔧 FIXED: Force promotion now properly applies rank locks
     async forcePromote(interaction) {
         const targetUser = interaction.options.getUser('user');
         const targetRankName = interaction.options.getString('rank');
@@ -587,16 +588,27 @@ module.exports = {
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            // Update user rank directly (bypass all requirements)
+            // 🔧 CRITICAL FIX: Apply rank lock for force promotions
             const oldRank = currentRank;
             user.rankName = targetRank.name;
             user.rankLevel = targetRank.level;
             user.rankPoints = 0; // Reset rank points
             user.promotionEligible = false;
             
-            // Remove any existing rank lock
-            user.rankLockUntil = null;
-            user.rankLockNotified = false;
+            // 🔧 FIXED: Apply proper rank lock instead of setting to null
+            const lockResult = RankSystem.applyRankLock(user, targetRank.level);
+            console.log(`🔧 Force promotion lock result:`, lockResult);
+            
+            if (lockResult.locked) {
+                user.rankLockUntil = lockResult.lockUntil;
+                user.rankLockNotified = false;
+                console.log(`🔒 Applied ${lockResult.lockDays} day rank lock until ${lockResult.lockUntil}`);
+            } else {
+                // Only set to null if the rank truly has no lock (Executive+ ranks)
+                user.rankLockUntil = null;
+                user.rankLockNotified = false;
+                console.log(`🔓 No rank lock applied (Executive+ rank or Probationary)`);
+            }
 
             // Add to promotion history
             user.promotionHistory.push({
@@ -616,7 +628,12 @@ module.exports = {
                 promotionType: 'force',
                 reason: `FORCE PROMOTION: ${reason}`,
                 rankPointsAtPromotion: user.rankPoints,
-                allTimePointsAtPromotion: user.allTimePoints
+                allTimePointsAtPromotion: user.allTimePoints,
+                // 🔧 FIXED: Include rank lock info in history
+                rankLockApplied: lockResult.locked ? {
+                    days: lockResult.lockDays,
+                    until: lockResult.lockUntil
+                } : null
             });
 
             await user.save();
@@ -624,7 +641,7 @@ module.exports = {
             // Create audit log
             const auditLog = new EventLog({
                 userId: targetUser.id,
-                username: user.username, // FIXED: Uses server nickname from database
+                username: user.username,
                 eventType: 'force_promotion',
                 description: `FORCE PROMOTED: ${oldRank.name} → ${targetRank.name} - ${reason}`,
                 pointsAwarded: 0,
@@ -636,17 +653,20 @@ module.exports = {
                     action: 'force_promotion',
                     reason: reason,
                     oldRank: oldRank.name,
-                    newRank: targetRank.name
+                    newRank: targetRank.name,
+                    // 🔧 FIXED: Log rank lock info
+                    rankLockApplied: lockResult.locked ? lockResult.lockDays : 0,
+                    rankLockUntil: lockResult.locked ? lockResult.lockUntil : null
                 }
             });
 
             await auditLog.save();
 
-            // Create warning embed
+            // Create response embed
             const warningEmbed = new EmbedBuilder()
                 .setColor('#ff6600')
                 .setTitle('⚠️ Force Promotion Completed')
-                .setDescription(`**${user.username}** has been force promoted!`) // FIXED: Uses server nickname
+                .setDescription(`**${user.username}** has been force promoted!`)
                 .setThumbnail(targetUser.displayAvatarURL())
                 .addFields(
                     { 
@@ -676,16 +696,32 @@ module.exports = {
                     },
                     { 
                         name: '⚠️ Notice', 
-                        value: 'This was a force promotion that bypassed normal requirements and rank locks.', 
+                        value: 'This was a force promotion that bypassed normal requirements.', 
                         inline: false 
                     }
-                )
-                .setFooter({ text: 'Force promotion logged in audit trail' })
-                .setTimestamp();
+                );
+
+            // 🔧 FIXED: Show rank lock status in force promotion response
+            if (lockResult.locked) {
+                warningEmbed.addFields({
+                    name: '🔒 Rank Lock Applied',
+                    value: `${lockResult.lockDays} days until next promotion eligibility`,
+                    inline: false
+                });
+            } else {
+                warningEmbed.addFields({
+                    name: '🔓 Rank Lock Status',
+                    value: 'No rank lock (Executive+ rank)',
+                    inline: false
+                });
+            }
+
+            warningEmbed.setFooter({ text: 'Force promotion logged in audit trail' })
+                        .setTimestamp();
 
             await interaction.reply({ embeds: [warningEmbed] });
 
-            console.log(`🚨 FORCE PROMOTION: ${user.username} force promoted from ${oldRank.name} to ${targetRank.name} by ${interaction.user.username} - Reason: ${reason}`);
+            console.log(`🚨 FORCE PROMOTION: ${user.username} force promoted from ${oldRank.name} to ${targetRank.name} by ${interaction.user.username} - Lock: ${lockResult.locked ? `${lockResult.lockDays} days` : 'none'}`);
 
         } catch (error) {
             console.error('❌ Force promotion error:', error);
@@ -708,7 +744,7 @@ module.exports = {
             const lockStatus = RankSystem.checkRankLockExpiry(user);
             
             if (lockStatus.expired || !user.rankLockUntil) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${user.username} is not currently rank locked.`); // FIXED: Uses server nickname
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${user.username} is not currently rank locked.`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
@@ -721,7 +757,7 @@ module.exports = {
             // Create audit log
             const auditLog = new EventLog({
                 userId: targetUser.id,
-                username: user.username, // FIXED: Uses server nickname from database
+                username: user.username,
                 eventType: 'rank_lock_bypass',
                 description: `RANK LOCK BYPASSED by HR - ${daysRemaining} days remaining - Reason: ${reason}`,
                 pointsAwarded: 0,
@@ -741,9 +777,9 @@ module.exports = {
             const successEmbed = new EmbedBuilder()
                 .setColor('#ff6600')
                 .setTitle('🔓 Rank Lock Bypassed')
-                .setDescription(`Rank lock removed for **${user.username}**`) // FIXED: Uses server nickname
+                .setDescription(`Rank lock removed for **${user.username}**`)
                 .addFields(
-                    { name: '👤 User', value: user.username, inline: true }, // FIXED: Uses server nickname
+                    { name: '👤 User', value: user.username, inline: true },
                     { name: '🎖️ Current Rank', value: RankSystem.formatRank(user), inline: true },
                     { name: '⏰ Days Bypassed', value: `${daysRemaining} days`, inline: true },
                     { name: '👤 Bypassed By', value: interaction.user.username, inline: true },
@@ -790,9 +826,9 @@ module.exports = {
             const successEmbed = new EmbedBuilder()
                 .setColor('#0099ff')
                 .setTitle('🔧 Rank Set Successfully')
-                .setDescription(`Rank updated for **${user.username}**`) // FIXED: Uses server nickname
+                .setDescription(`Rank updated for **${user.username}**`)
                 .addFields(
-                    { name: '👤 User', value: user.username, inline: true }, // FIXED: Uses server nickname
+                    { name: '👤 User', value: user.username, inline: true },
                     { name: '📈 Rank Change', value: `${RankSystem.getRankEmoji(oldRank.level)} ${oldRank.name} → ${RankSystem.getRankEmoji(targetRank.level)} ${targetRank.name}`, inline: false },
                     { name: '📊 Rank Points Set', value: `${rankPoints} points toward next promotion`, inline: true },
                     { name: '👤 Set By', value: interaction.user.username, inline: true }

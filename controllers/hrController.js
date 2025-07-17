@@ -1,13 +1,14 @@
-// controllers/hrController.js - COMPLETE FILE with point system fixes
+// controllers/hrController.js - COMPLETE FILE with fixed promotion notifications
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const SWATEmbeds = require('../views/embedBuilder');
 const PermissionChecker = require('../utils/permissionChecker');
 const QuotaSystem = require('../utils/quotaSystem');
+const RankSystem = require('../utils/rankSystem');
 const { EmbedBuilder } = require('discord.js');
 
 class HRController {
-    // FIXED: Manage user points - now properly updates rank progression
+    // 🔧 FIXED: Manage user points with proper promotion notifications
     static async managePoints(interaction, targetUser, action, amount, reason) {
         try {
             // Check HR permission
@@ -23,15 +24,19 @@ class HRController {
                 const targetMember = await interaction.guild.members.fetch(targetUser.id);
                 user = new SWATUser({
                     discordId: targetUser.id,
-                    username: targetMember.displayName || targetUser.username
+                    username: targetMember.displayName || targetUser.username,
+                    rankPoints: 0 // 🔧 FIXED: Initialize rank points for new users
                 });
             }
 
-            // Store old values for logging
-            const oldWeeklyPoints = user.weeklyPoints;
-            const oldAllTimePoints = user.allTimePoints;
-            const oldRankPoints = user.rankPoints;
-            const oldPromotionEligible = user.promotionEligible;
+            // 🔧 FIXED: Store old values for logging with safe fallbacks
+            const oldWeeklyPoints = user.weeklyPoints || 0;
+            const oldAllTimePoints = user.allTimePoints || 0;
+            const oldRankPoints = user.rankPoints || 0; // SAFE FALLBACK
+            
+            // 🔧 FIXED: Check promotion requirements BEFORE point changes
+            const pointsBefore = RankSystem.checkPointRequirements(user);
+            const pointsWereMetBefore = pointsBefore.pointsMet;
 
             // Handle remove_all action with safety checks
             if (action === 'remove_all') {
@@ -44,7 +49,7 @@ class HRController {
                         .addFields(
                             { 
                                 name: '💥 This Will Remove', 
-                                value: `• Weekly Points: **${user.weeklyPoints}**\n• All-Time Points: **${user.allTimePoints}**\n• Rank Points: **${user.rankPoints}**\n• Quota Completion Status: **${user.quotaCompleted ? 'Completed' : 'In Progress'}**`, 
+                                value: `• Weekly Points: **${user.weeklyPoints || 0}**\n• All-Time Points: **${user.allTimePoints || 0}**\n• Rank Points: **${user.rankPoints || 0}**\n• Quota Completion Status: **${user.quotaCompleted ? 'Completed' : 'In Progress'}**`, 
                                 inline: false 
                             },
                             { 
@@ -56,31 +61,19 @@ class HRController {
                                 name: '✅ To Confirm', 
                                 value: 'Include the word "**confirm**" in your reason to proceed', 
                                 inline: false 
-                            },
-                            { 
-                                name: '📝 Example', 
-                                value: '```Reason: "Major violation - confirm removal of all points"```', 
-                                inline: false 
                             }
                         )
-                        .setFooter({ text: 'This is a destructive action - please be certain!' })
                         .setTimestamp();
 
                     return await interaction.reply({ embeds: [warningEmbed], ephemeral: true });
                 }
 
-                // Additional safety: require minimum reason length
-                if (reason.length < 5) {
-                    const errorEmbed = SWATEmbeds.createErrorEmbed('⚠️ Please provide a reason for removing all points.');
-                    return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-                }
-
                 // Execute the nuclear option - FIXED: Also reset rank points
                 user.weeklyPoints = 0;
                 user.allTimePoints = 0;
-                user.rankPoints = 0; // FIXED: Also reset rank points
+                user.rankPoints = 0; // 🔧 FIXED: Also reset rank points
                 user.quotaCompleted = false;
-                user.promotionEligible = false; // FIXED: Reset promotion eligibility
+                user.promotionEligible = false; // 🔧 FIXED: Reset promotion eligibility
 
                 await user.save();
 
@@ -103,7 +96,7 @@ class HRController {
                         newWeeklyPoints: 0,
                         oldAllTimePoints: oldAllTimePoints,
                         newAllTimePoints: 0,
-                        oldRankPoints: oldRankPoints, // FIXED: Track rank points
+                        oldRankPoints: oldRankPoints, // 🔧 FIXED: Track rank points
                         newRankPoints: 0
                     }
                 });
@@ -119,84 +112,65 @@ class HRController {
                         { name: '👤 Target User', value: user.username, inline: true },
                         { name: '🔧 Action', value: '🚨 REMOVE ALL', inline: true },
                         { name: '💥 Points Removed', value: `${oldWeeklyPoints} weekly\n${oldAllTimePoints} all-time\n${oldRankPoints} rank`, inline: true },
-                        { name: '📊 Weekly Points', value: `${oldWeeklyPoints} → **0**`, inline: true },
-                        { name: '⭐ All-Time Points', value: `${oldAllTimePoints} → **0**`, inline: true },
-                        { name: '🎖️ Rank Points', value: `${oldRankPoints} → **0**`, inline: true },
-                        { name: '🎯 Quota Status', value: '✅ → ❌ Reset', inline: true },
-                        { name: '🎯 Promotion Status', value: '✅ → ❌ Reset', inline: true },
-                        { name: '📝 Reason', value: reason, inline: false },
-                        { name: '⚠️ CRITICAL ACTION', value: 'This user has had ALL points removed. This action has been logged for audit purposes and **cannot be undone**.', inline: false }
+                        { name: '📝 Reason', value: reason, inline: false }
                     )
-                    .setFooter({ text: `Critical action performed by ${interaction.user.username}` })
                     .setTimestamp();
 
                 await interaction.reply({ embeds: [responseEmbed] });
 
-                // Enhanced logging for critical actions
                 console.log(`🚨 CRITICAL HR ACTION: ${interaction.user.username} REMOVED ALL POINTS from ${user.username}`);
-                console.log(`   - Weekly points removed: ${oldWeeklyPoints}`);
-                console.log(`   - All-time points removed: ${oldAllTimePoints}`);
-                console.log(`   - Rank points removed: ${oldRankPoints}`);
-                console.log(`   - Reason: ${reason}`);
-                console.log(`   - Timestamp: ${new Date().toISOString()}`);
-
                 return; // Exit early for remove_all
             }
 
             // Handle standard point actions
             switch (action) {
                 case 'add':
-                    user.weeklyPoints += amount;
-                    user.allTimePoints += amount;
+                    user.weeklyPoints = (user.weeklyPoints || 0) + amount;
+                    user.allTimePoints = (user.allTimePoints || 0) + amount;
                     break;
                 case 'remove':
-                    user.weeklyPoints = Math.max(0, user.weeklyPoints - amount);
-                    user.allTimePoints = Math.max(0, user.allTimePoints - amount);
+                    user.weeklyPoints = Math.max(0, (user.weeklyPoints || 0) - amount);
+                    user.allTimePoints = Math.max(0, (user.allTimePoints || 0) - amount);
                     break;
                 case 'set':
-                    const difference = amount - user.weeklyPoints;
+                    const difference = amount - (user.weeklyPoints || 0);
                     user.weeklyPoints = amount;
-                    user.allTimePoints = Math.max(0, user.allTimePoints + difference);
+                    user.allTimePoints = Math.max(0, (user.allTimePoints || 0) + difference);
                     break;
                 default:
                     const errorEmbed = SWATEmbeds.createErrorEmbed('⚠️ Invalid action. Use: add, remove, set, or remove_all');
                     return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            // FIXED: Update rank points properly for HR adjustments
-            const RankSystem = require('../utils/rankSystem');
+            // 🔧 FIXED: Update rank points properly for HR adjustments
             if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
                 // For non-Executive ranks, adjust rank points by the same amount as the adjustment
                 if (action === 'add') {
-                    user.rankPoints += amount;
+                    user.rankPoints = (user.rankPoints || 0) + amount;
                 } else if (action === 'remove') {
-                    user.rankPoints = Math.max(0, user.rankPoints - amount);
+                    user.rankPoints = Math.max(0, (user.rankPoints || 0) - amount);
                 } else if (action === 'set') {
                     // For set action, calculate the difference and apply to rank points
                     const difference = amount - oldWeeklyPoints;
-                    user.rankPoints = Math.max(0, user.rankPoints + difference);
+                    user.rankPoints = Math.max(0, (user.rankPoints || 0) + difference);
                 }
-                // Note: remove_all action already handles rank points correctly (sets to 0)
             } else {
                 // Executive+ ranks don't track rank points for promotion
                 user.rankPoints = 0;
             }
 
-            // FIXED: Update quota status using rank-based quota system
+            // Update quota status using rank-based quota system
             const currentQuota = QuotaSystem.getUserQuota(user);
             user.weeklyQuota = currentQuota;
             user.quotaCompleted = QuotaSystem.isQuotaCompleted(user);
 
-            // FIXED: Update promotion eligibility after HR point changes
-            const eligibilityCheck = RankSystem.checkPromotionEligibility(user);
-            user.promotionEligible = eligibilityCheck.eligible;
-
-            // Log promotion eligibility changes
-            if (!oldPromotionEligible && eligibilityCheck.eligible) {
-                console.log(`🎯 PROMOTION ELIGIBLE: ${user.username} is now eligible for promotion to ${eligibilityCheck.nextRank?.name} (after HR point adjustment)`);
-            } else if (oldPromotionEligible && !eligibilityCheck.eligible) {
-                console.log(`⚠️ PROMOTION LOST: ${user.username} is no longer eligible (${eligibilityCheck.reason}) (after HR point adjustment)`);
-            }
+            // 🔧 FIXED: Check promotion status AFTER point changes
+            const pointsAfter = RankSystem.checkPointRequirements(user);
+            const pointsAreMetAfter = pointsAfter.pointsMet;
+            const eligibilityAfter = RankSystem.checkPromotionEligibility(user);
+            
+            // Update promotion eligibility flag (for HR dashboard)
+            user.promotionEligible = eligibilityAfter.eligible;
 
             await user.save();
 
@@ -219,15 +193,15 @@ class HRController {
                     newWeeklyPoints: user.weeklyPoints,
                     oldAllTimePoints: oldAllTimePoints,
                     newAllTimePoints: user.allTimePoints,
-                    oldRankPoints: oldRankPoints, // FIXED: Track rank points
+                    oldRankPoints: oldRankPoints, // 🔧 FIXED: Track rank points
                     newRankPoints: user.rankPoints,
-                    promotionEligibilityChanged: oldPromotionEligible !== user.promotionEligible
+                    promotionEligibilityChanged: pointsWereMetBefore !== pointsAreMetAfter
                 }
             });
 
             await auditLog.save();
 
-            // ENHANCED: Create response embed with rank progression info
+            // Create response embed with rank progression info
             const embed = new EmbedBuilder()
                 .setColor('#ff6600')
                 .setTitle('🛠️ HR Points Management')
@@ -246,17 +220,81 @@ class HRController {
                 .setFooter({ text: `Action performed by ${interaction.user.username}` })
                 .setTimestamp();
 
-            // Add promotion notification if eligibility changed
-            if (!oldPromotionEligible && user.promotionEligible) {
+            // 🔧 FIXED: Send promotion notification if user newly meets point requirements
+            const pointsNewlyMet = !pointsWereMetBefore && pointsAreMetAfter;
+
+            if (pointsNewlyMet && pointsAfter.nextRank) {
+                console.log(`🎯 HR ADJUSTMENT RESULT: ${user.username} now meets point requirements for promotion to ${pointsAfter.nextRank.name} (after HR point adjustment)`);
+                
+                // Add promotion update to HR response
                 embed.addFields({
                     name: '🎯 Promotion Update',
-                    value: `✅ User is now **ELIGIBLE** for promotion to ${eligibilityCheck.nextRank?.name}!`,
+                    value: `✅ User now **MEETS POINT REQUIREMENTS** for promotion to ${RankSystem.getRankEmoji(pointsAfter.nextRank.level)} ${pointsAfter.nextRank.name}!`,
                     inline: false
                 });
-            } else if (oldPromotionEligible && !user.promotionEligible) {
+                
+                // Send DM notification to target user about meeting point requirements
+                try {
+                    const lockStatus = RankSystem.checkRankLockExpiry(user);
+                    const isCurrentlyLocked = !lockStatus.expired && lockStatus.daysRemaining;
+                    
+                    let notificationTitle, notificationDescription;
+                    
+                    if (isCurrentlyLocked) {
+                        notificationTitle = '🎯 Point Requirements Met (HR Adjustment)';
+                        notificationDescription = `Great news! After your recent HR point adjustment, you now have enough rank points for promotion to **${RankSystem.getRankEmoji(pointsAfter.nextRank.level)} ${pointsAfter.nextRank.name}**!\n\nYou are currently rank locked for ${lockStatus.daysRemaining} more day${lockStatus.daysRemaining > 1 ? 's' : ''}. Once your rank lock expires, you'll be eligible for promotion!`;
+                    } else {
+                        notificationTitle = '🎉 Promotion Eligible (HR Adjustment)';
+                        notificationDescription = `Excellent news! After your recent HR point adjustment, you're now **fully eligible** for promotion to **${RankSystem.getRankEmoji(pointsAfter.nextRank.level)} ${pointsAfter.nextRank.name}**!`;
+                    }
+                    
+                    const hrNotification = new EmbedBuilder()
+                        .setColor('#00ff00')
+                        .setTitle(notificationTitle)
+                        .setDescription(notificationDescription)
+                        .addFields(
+                            {
+                                name: '✅ Requirements Met',
+                                value: `Rank Points: ${pointsAfter.rankPoints}/${pointsAfter.pointsRequired}`,
+                                inline: false
+                            },
+                            {
+                                name: '📝 Adjustment Reason',
+                                value: reason,
+                                inline: false
+                            },
+                            {
+                                name: '📋 Next Steps',
+                                value: isCurrentlyLocked ? 
+                                    'Wait for your rank lock to expire, then contact HR for promotion review!' :
+                                    'Contact HR when you\'re ready for your promotion review!',
+                                inline: false
+                            }
+                        )
+                        .setFooter({ 
+                            text: 'This notification is due to an HR point adjustment' 
+                        })
+                        .setTimestamp();
+
+                    await targetUser.send({ embeds: [hrNotification] });
+                    console.log(`📱 HR NOTIFICATION SENT: ${user.username} notified about meeting point requirements via HR adjustment`);
+                    
+                } catch (dmError) {
+                    console.log(`📱 Could not DM ${user.username} about HR promotion eligibility (DMs disabled)`);
+                    
+                    // Add note to HR response about failed DM
+                    embed.addFields({
+                        name: '📱 DM Status',
+                        value: '⚠️ Could not notify user (DMs disabled). User should be informed manually.',
+                        inline: false
+                    });
+                }
+            } else if (pointsWereMetBefore && !pointsAreMetAfter) {
+                console.log(`⚠️ PROMOTION LOST: ${user.username} no longer meets point requirements (after HR point adjustment)`);
+                
                 embed.addFields({
                     name: '🎯 Promotion Update',
-                    value: `❌ User is no longer eligible for promotion (${eligibilityCheck.reason})`,
+                    value: `❌ User no longer meets point requirements for promotion`,
                     inline: false
                 });
             }
@@ -268,7 +306,8 @@ class HRController {
             console.log(`   - Weekly: ${oldWeeklyPoints} → ${user.weeklyPoints}`);
             console.log(`   - All-time: ${oldAllTimePoints} → ${user.allTimePoints}`);
             console.log(`   - Rank points: ${oldRankPoints} → ${user.rankPoints}`);
-            console.log(`   - Promotion eligible: ${oldPromotionEligible} → ${user.promotionEligible}`);
+            console.log(`   - Point requirements met: ${pointsWereMetBefore} → ${pointsAreMetAfter} (newly met: ${pointsNewlyMet})`);
+            console.log(`   - Promotion eligible: ${user.promotionEligible}`);
             console.log(`   - Reason: ${reason}`);
 
         } catch (error) {
@@ -570,8 +609,6 @@ class HRController {
         }
     }
 
-    // Addition to controllers/hrController.js - Add this method to the HRController class
-
     // NEW: Comprehensive audit data compilation for the /audit-user command
     static async compileAuditData(targetUserId, days = 7) {
         try {
@@ -727,7 +764,6 @@ class HRController {
             };
         }
 
-        const RankSystem = require('../utils/rankSystem');
         const totalPoints = events.reduce((sum, e) => sum + e.pointsAwarded, 0);
         const avgPointsPerEvent = totalPoints / events.length;
         

@@ -1,4 +1,4 @@
-// utils/rankSystem.js - Complete SWAT Rank Progression System
+// utils/rankSystem.js - FIXED promotion eligibility to properly check rank locks
 class RankSystem {
     // Complete 15-rank SWAT progression with your exact specifications
     static ranks = [
@@ -133,7 +133,50 @@ class RankSystem {
         return this.getRankByLevel(nextLevel);
     }
 
-    // Check if user can be promoted based on rank points (separate from all-time points)
+    // 🔧 NEW: Check if user meets point requirements (regardless of rank lock)
+    static checkPointRequirements(user) {
+        const currentRank = this.getRankByLevel(user.rankLevel || 1);
+        const nextRank = this.getNextRank(user.rankLevel || 1);
+        
+        if (!nextRank) {
+            return {
+                pointsMet: false,
+                reason: 'Already at maximum rank',
+                maxRank: true,
+                currentRank,
+                nextRank: null
+            };
+        }
+
+        // For Executive+ ranks (hand-picked only)
+        if (nextRank.level >= 11) {
+            return {
+                pointsMet: false,
+                reason: 'Executive ranks are hand-picked only',
+                handPickedOnly: true,
+                currentRank,
+                nextRank
+            };
+        }
+
+        // Check rank points regardless of rank lock
+        const rankPoints = user.rankPoints || 0;
+        const pointsRequired = nextRank.pointsRequired;
+        const hasEnoughPoints = rankPoints >= pointsRequired;
+        
+        console.log(`📊 Point requirements check for ${user.username}: ${rankPoints}/${pointsRequired} rank points, met: ${hasEnoughPoints}`);
+        
+        return {
+            pointsMet: hasEnoughPoints,
+            rankPoints,
+            pointsRequired,
+            currentRank,
+            nextRank,
+            reason: hasEnoughPoints ? 'Point requirements met!' : `Need ${pointsRequired - rankPoints} more rank points`
+        };
+    }
+
+    // 🔧 UPDATED: Check promotion eligibility with proper rank lock validation
     static checkPromotionEligibility(user) {
         const currentRank = this.getRankByLevel(user.rankLevel || 1);
         const nextRank = this.getNextRank(user.rankLevel || 1);
@@ -147,23 +190,35 @@ class RankSystem {
                 nextRank: null
             };
         }
-
-        // Check if user is rank locked
+    
+        // Check rank lock status FIRST before checking points
         const now = new Date();
         const isRankLocked = user.rankLockUntil && user.rankLockUntil > now;
         
         if (isRankLocked) {
             const daysRemaining = Math.ceil((user.rankLockUntil - now) / (1000 * 60 * 60 * 24));
+            console.log(`🔒 User ${user.username} is rank locked for ${daysRemaining} more days`);
+            
+            // 🔧 FIXED: Still return requirements even when rank locked (for progress bar display)
+            const rankPoints = user.rankPoints || 0;
+            const pointsRequired = nextRank.pointsRequired;
+            
             return {
                 eligible: false,
                 reason: `Rank locked for ${daysRemaining} more days`,
                 rankLocked: true,
                 daysRemaining,
                 currentRank,
-                nextRank
+                nextRank,
+                requirements: {
+                    pointsRequired,
+                    currentPoints: rankPoints,
+                    pointsRemaining: Math.max(0, pointsRequired - rankPoints),
+                    met: rankPoints >= pointsRequired
+                }
             };
         }
-
+    
         // For Executive+ ranks (hand-picked only)
         if (nextRank.level >= 11) {
             return {
@@ -174,11 +229,13 @@ class RankSystem {
                 nextRank
             };
         }
-
-        // Check rank points (separate from all-time points)
+    
+        // Check rank points with safe fallback
         const rankPoints = user.rankPoints || 0;
         const pointsRequired = nextRank.pointsRequired;
         const hasEnoughPoints = rankPoints >= pointsRequired;
+        
+        console.log(`📊 Eligibility check for ${user.username}: ${rankPoints}/${pointsRequired} rank points, locked: ${isRankLocked}, eligible: ${hasEnoughPoints && !isRankLocked}`);
         
         return {
             eligible: hasEnoughPoints,
@@ -227,7 +284,17 @@ class RankSystem {
         
         if (eligibility.maxRank) return { percentage: 100, isMaxRank: true };
         if (eligibility.handPickedOnly) return { percentage: 100, isHandPicked: true };
-        if (!eligibility.requirements) return { percentage: 0 };
+        
+        // 🔧 FIXED: Always return requirements if they exist
+        if (!eligibility.requirements) {
+            // Fallback for edge cases
+            return { 
+                percentage: 0,
+                current: 0,
+                required: 0,
+                remaining: 0
+            };
+        }
         
         const percentage = Math.min(100, 
             (eligibility.requirements.currentPoints / eligibility.requirements.pointsRequired) * 100
@@ -240,6 +307,7 @@ class RankSystem {
             remaining: eligibility.requirements.pointsRemaining
         };
     }
+    
 
     // Create progress bar for rank progression
     static createRankProgressBar(user, length = 10) {
@@ -248,13 +316,18 @@ class RankSystem {
         if (progress.isMaxRank) return '[████████████] MAX RANK';
         if (progress.isHandPicked) return '[████████████] HAND-PICKED';
         
-        const filledLength = Math.floor((progress.percentage / 100) * length);
+        // 🔧 FIXED: Ensure we have valid numbers
+        const currentPoints = progress.current || 0;
+        const requiredPoints = progress.required || 1; // Avoid division by zero
+        const percentage = progress.percentage || 0;
+        
+        const filledLength = Math.floor((percentage / 100) * length);
         const emptyLength = length - filledLength;
         
-        const filledBar = '█'.repeat(filledLength);
-        const emptyBar = '░'.repeat(emptyLength);
+        const filledBar = '█'.repeat(Math.max(0, filledLength));
+        const emptyBar = '░'.repeat(Math.max(0, emptyLength));
         
-        return `[${filledBar}${emptyBar}] ${progress.current}/${progress.required} pts (${progress.percentage}%)`;
+        return `[${filledBar}${emptyBar}] ${currentPoints}/${requiredPoints} pts (${percentage}%)`;
     }
 
     // Apply rank lock when user gets promoted
@@ -264,9 +337,6 @@ class RankSystem {
         if (newRank.rankLockDays > 0) {
             const lockDate = new Date();
             lockDate.setDate(lockDate.getDate() + newRank.rankLockDays);
-            
-            user.rankLockUntil = lockDate;
-            user.rankLockNotified = false; // Reset notification flag
             
             return {
                 locked: true,
@@ -278,15 +348,19 @@ class RankSystem {
         return { locked: false };
     }
 
-    // Check if user's rank lock has expired
+    // 🔧 IMPROVED: Check if user's rank lock has expired with better logging
     static checkRankLockExpiry(user) {
-        if (!user.rankLockUntil) return { expired: false };
+        if (!user.rankLockUntil) {
+            console.log(`🔓 User ${user.username} has no rank lock set`);
+            return { expired: false };
+        }
         
         const now = new Date();
         const hasExpired = user.rankLockUntil <= now;
         
         if (hasExpired) {
             const wasNotified = user.rankLockNotified;
+            console.log(`🔓 User ${user.username} rank lock has EXPIRED, notified: ${wasNotified}`);
             return {
                 expired: true,
                 needsNotification: !wasNotified
@@ -294,6 +368,7 @@ class RankSystem {
         }
         
         const daysRemaining = Math.ceil((user.rankLockUntil - now) / (1000 * 60 * 60 * 24));
+        console.log(`🔒 User ${user.username} rank lock active for ${daysRemaining} more days`);
         return {
             expired: false,
             daysRemaining

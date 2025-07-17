@@ -1,4 +1,4 @@
-// utils/dailyAutomation.js - Complete daily automation system for SWAT promotion management
+// utils/dailyAutomation.js - FIXED daily automation system focused on rank lock expiry
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const RankSystem = require('./rankSystem');
@@ -6,7 +6,7 @@ const PromotionChecker = require('./promotionChecker');
 const { EmbedBuilder } = require('discord.js');
 
 class DailyAutomation {
-    // Main daily automation runner - call this once per day
+    // 🔧 FIXED: Main daily automation runner - focuses on rank lock expiry notifications
     static async runDailyAutomation(client) {
         try {
             console.log('🤖 Starting daily automation system...');
@@ -14,29 +14,31 @@ class DailyAutomation {
             const results = {
                 timestamp: new Date(),
                 rankLocksExpired: 0,
-                notificationsSent: 0,
-                newlyEligible: 0,
-                totalEligible: 0,
+                lockNotificationsSent: 0,
+                currentlyEligible: 0,
                 hrNotificationSent: false,
                 errors: []
             };
 
-            // Step 1: Process rank lock expirations and send notifications
+            // 🔧 PRIMARY FOCUS: Process rank lock expirations and send notifications
             const lockResults = await this.processRankLockExpirations(client);
             results.rankLocksExpired = lockResults.expired;
-            results.notificationsSent = lockResults.notified;
+            results.lockNotificationsSent = lockResults.notified;
             results.errors.push(...lockResults.errors);
 
-            // Step 2: Check for newly eligible users
-            const eligibilityResults = await PromotionChecker.checkAllUsersEligibility();
-            if (eligibilityResults) {
-                results.newlyEligible = eligibilityResults.newlyEligible;
-                results.totalEligible = eligibilityResults.totalEligible;
+            // 🔧 SECONDARY: Get count of currently eligible users (for HR dashboard)
+            const eligibilityReport = await PromotionChecker.getEligibilityReport();
+            if (eligibilityReport) {
+                results.currentlyEligible = eligibilityReport.totalEligible;
             }
 
-            // Step 3: Send HR daily summary if there are promotions to handle
-            if (results.totalEligible > 0 || results.newlyEligible > 0) {
-                const hrResults = await this.sendHRDailySummary(client, eligibilityResults);
+            // 🔧 FIXED: Send HR daily summary only if there are rank locks expired or users eligible
+            if (results.rankLocksExpired > 0 || results.currentlyEligible > 0) {
+                const hrResults = await this.sendHRDailySummary(client, {
+                    rankLocksExpired: results.rankLocksExpired,
+                    currentlyEligible: results.currentlyEligible,
+                    eligibilityReport
+                });
                 results.hrNotificationSent = hrResults.sent;
                 if (hrResults.errors) results.errors.push(...hrResults.errors);
             }
@@ -46,9 +48,8 @@ class DailyAutomation {
 
             console.log('✅ Daily automation completed successfully');
             console.log(`   - Rank locks expired: ${results.rankLocksExpired}`);
-            console.log(`   - Notifications sent: ${results.notificationsSent}`);
-            console.log(`   - Newly eligible: ${results.newlyEligible}`);
-            console.log(`   - Total eligible: ${results.totalEligible}`);
+            console.log(`   - Lock notifications sent: ${results.lockNotificationsSent}`);
+            console.log(`   - Currently eligible users: ${results.currentlyEligible}`);
             console.log(`   - HR notified: ${results.hrNotificationSent}`);
 
             return results;
@@ -60,11 +61,12 @@ class DailyAutomation {
         }
     }
 
-    // Process rank lock expirations and send one-time notifications
+    // 🔧 FIXED: Process rank lock expirations with enhanced notifications
     static async processRankLockExpirations(client) {
         try {
             console.log('🔓 Processing rank lock expirations...');
 
+            // Get all users with active rank locks
             const users = await SWATUser.find({
                 rankLockUntil: { $exists: true, $ne: null }
             });
@@ -74,45 +76,125 @@ class DailyAutomation {
             const errors = [];
             const expiredUsers = [];
 
+            const guild = client.guilds.cache.first();
+            if (!guild) {
+                console.error('❌ No guild found for rank lock processing');
+                return { expired: 0, notified: 0, errors: ['No guild found'], expiredUsers: [] };
+            }
+
             for (const user of users) {
                 try {
                     const lockStatus = RankSystem.checkRankLockExpiry(user);
                     
                     if (lockStatus.expired && lockStatus.needsNotification) {
+                        // 🔧 FIXED: Get server nickname instead of Discord username
+                        let displayName = user.username; // Fallback to stored username
+                        
+                        try {
+                            const member = await guild.members.fetch(user.discordId);
+                            displayName = member.displayName || member.user.username;
+                            
+                            // Update stored username with current server nickname
+                            if (user.username !== displayName) {
+                                user.username = displayName;
+                                console.log(`📝 Updated stored nickname: ${user.username} → ${displayName}`);
+                            }
+                        } catch (fetchError) {
+                            console.log(`⚠️ Could not fetch member ${user.username} (may have left server)`);
+                        }
+                        
                         // Mark as notified to prevent spam
                         user.rankLockNotified = true;
                         await user.save();
                         
                         expired++;
-                        expiredUsers.push(user);
+                        expiredUsers.push({
+                            ...user.toObject(),
+                            displayName
+                        });
 
-                        // Send one-time DM notification
+                        // 🔧 FIXED: Send enhanced rank lock expiry notification
                         try {
                             const discordUser = await client.users.fetch(user.discordId);
-                            const notification = PromotionChecker.createLockExpiryNotification(user);
+                            const eligibility = RankSystem.checkPromotionEligibility(user);
+                            const pointsCheck = RankSystem.checkPointRequirements(user);
                             
-                            if (notification) {
-                                const embed = new EmbedBuilder()
-                                    .setColor(notification.color)
-                                    .setTitle(notification.title)
-                                    .setDescription(notification.description);
-                                
-                                if (notification.fields) {
-                                    embed.addFields(notification.fields);
-                                }
-                                
-                                await discordUser.send({ embeds: [embed] });
-                                notified++;
-                                
-                                console.log(`📱 Sent rank lock expiry notification to ${user.username}`);
+                            let notificationTitle, notificationDescription, notificationFields = [];
+                            
+                            if (!eligibility.nextRank) {
+                                // User is at maximum rank
+                                notificationTitle = '🔓 Rank Lock Expired';
+                                notificationDescription = `Your rank lock has expired! You are now at the maximum rank: **${RankSystem.formatRank(user)}**`;
+                                notificationFields.push({
+                                    name: '👑 Maximum Rank Achieved',
+                                    value: 'Continue your excellent service as a leader in the SWAT team!',
+                                    inline: false
+                                });
+                            } else if (RankSystem.isExecutiveOrHigher(eligibility.nextRank.level)) {
+                                // Next rank is Executive+ (hand-picked)
+                                notificationTitle = '🔓 Rank Lock Expired';
+                                notificationDescription = `Your rank lock has expired! Your next potential promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}** is hand-picked by leadership.`;
+                                notificationFields.push({
+                                    name: '👑 Executive Promotion',
+                                    value: 'Executive ranks are hand-picked based on leadership qualities and exceptional service.',
+                                    inline: false
+                                });
+                            } else if (pointsCheck.pointsMet) {
+                                // User already has enough points - fully eligible!
+                                notificationTitle = '🎉 Rank Lock Expired - You\'re Promotion Eligible!';
+                                notificationDescription = `Excellent news! Your rank lock has expired and you already have enough rank points for promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}**!`;
+                                notificationFields.push(
+                                    {
+                                        name: '✅ Requirements Status',
+                                        value: `Rank Points: ${pointsCheck.rankPoints}/${pointsCheck.pointsRequired} ✅`,
+                                        inline: false
+                                    },
+                                    {
+                                        name: '🎯 You\'re Ready!',
+                                        value: 'Contact HR immediately for your promotion review - you\'re fully eligible!',
+                                        inline: false
+                                    }
+                                );
+                            } else {
+                                // User was locked and still needs more points
+                                notificationTitle = '🔓 Rank Lock Expired';
+                                notificationDescription = `Your rank lock has expired! You can now work toward promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}**`;
+                                notificationFields.push(
+                                    {
+                                        name: '📈 Point Progress',
+                                        value: `You currently have ${pointsCheck.rankPoints}/${pointsCheck.pointsRequired} rank points. You need ${pointsCheck.pointsRequired - pointsCheck.rankPoints} more points for promotion.`,
+                                        inline: false
+                                    },
+                                    {
+                                        name: '💡 How to Progress',
+                                        value: 'Submit events using `/submit-event` to earn rank points toward your promotion!',
+                                        inline: false
+                                    }
+                                );
                             }
+
+                            const notification = new EmbedBuilder()
+                                .setColor('#00ff00')
+                                .setTitle(notificationTitle)
+                                .setDescription(notificationDescription)
+                                .addFields(notificationFields)
+                                .setFooter({ 
+                                    text: 'Keep up the great work! Submit events to continue your SWAT career progression.' 
+                                })
+                                .setTimestamp();
+                            
+                            await discordUser.send({ embeds: [notification] });
+                            notified++;
+                            
+                            console.log(`📱 Sent enhanced rank lock expiry notification to ${displayName}`);
+                            
                         } catch (dmError) {
-                            console.log(`📱 Could not DM ${user.username} (DMs disabled or user not found)`);
+                            console.log(`📱 Could not DM ${displayName} (DMs disabled or user not found)`);
                             // Still count as processed, just couldn't notify
                         }
                     }
                 } catch (userError) {
-                    console.error(`❌ Error processing ${user.username}:`, userError);
+                    console.error(`❌ Error processing rank lock for ${user.username}:`, userError);
                     errors.push(`${user.username}: ${userError.message}`);
                 }
             }
@@ -135,43 +217,52 @@ class DailyAutomation {
         }
     }
 
-    // Send daily summary to HR about promotions
-    static async sendHRDailySummary(client, eligibilityData) {
+    // 🔧 FIXED: Send HR daily summary with server nicknames
+    static async sendHRDailySummary(client, automationData) {
         try {
             console.log('📊 Preparing HR daily summary...');
 
-            // Find HR channel or users (you'll need to configure this)
             const guild = client.guilds.cache.first();
             if (!guild) {
                 return { sent: false, errors: ['No guild found'] };
             }
 
-            // Get all members with HR role
-            const hrRole = guild.roles.cache.find(role => role.name === 'HR');
-            if (!hrRole) {
-                return { sent: false, errors: ['HR role not found'] };
-            }
+            // Get all members with HR roles (Executive Operator and above)
+            const hrRoles = [
+                'Executive Operator',
+                'Senior Executive Operator',
+                'Operations Chief', 
+                'Deputy Commander',
+                'SWAT Commander'
+            ];
 
-            const hrMembers = hrRole.members;
+            const hrMembers = new Set();
+            hrRoles.forEach(roleName => {
+                const role = guild.roles.cache.find(r => r.name === roleName);
+                if (role) {
+                    role.members.forEach(member => hrMembers.add(member));
+                }
+            });
+
             if (hrMembers.size === 0) {
                 return { sent: false, errors: ['No HR members found'] };
             }
 
-            // Create HR summary embed
-            const summaryEmbed = await this.createHRSummaryEmbed(eligibilityData);
+            // 🔧 FIXED: Create HR summary embed with server nicknames
+            const summaryEmbed = await this.createHRSummaryEmbed(automationData);
             
             let sentCount = 0;
             const errors = [];
 
             // Send to each HR member
-            for (const [userId, member] of hrMembers) {
+            for (const member of hrMembers) {
                 try {
                     await member.send({ embeds: [summaryEmbed] });
                     sentCount++;
-                    console.log(`📊 Sent HR summary to ${member.user.username}`);
+                    console.log(`📊 Sent HR summary to ${member.displayName || member.user.username}`);
                 } catch (dmError) {
-                    console.log(`📊 Could not DM HR summary to ${member.user.username} (DMs disabled)`);
-                    errors.push(`Could not DM ${member.user.username}`);
+                    console.log(`📊 Could not DM HR summary to ${member.displayName || member.user.username} (DMs disabled)`);
+                    errors.push(`Could not DM ${member.displayName || member.user.username}`);
                 }
             }
 
@@ -190,47 +281,51 @@ class DailyAutomation {
         }
     }
 
-    // Create HR daily summary embed
-    static async createHRSummaryEmbed(eligibilityData) {
+    // 🔧 FIXED: Create HR daily summary embed with server nicknames
+    static async createHRSummaryEmbed(automationData) {
         const embed = new EmbedBuilder()
             .setColor('#0099ff')
-            .setTitle('📊 HR Daily Promotion Summary')
-            .setDescription('Daily summary of promotion management tasks')
+            .setTitle('📊 HR Daily Automation Summary')
+            .setDescription('Daily summary of rank lock and promotion management')
             .setTimestamp();
 
-        if (!eligibilityData || eligibilityData.totalEligible === 0) {
+        // Rank lock summary
+        if (automationData.rankLocksExpired > 0) {
             embed.addFields({
-                name: '✅ No Action Required',
-                value: 'No users are currently eligible for promotion.',
-                inline: false
+                name: '🔓 Rank Locks Expired',
+                value: `${automationData.rankLocksExpired} users had their rank locks expire today`,
+                inline: true
             });
-            return embed;
         }
 
-        // Add summary statistics
-        embed.addFields(
-            {
-                name: '📊 Summary',
-                value: `**Total Eligible:** ${eligibilityData.totalEligible}\n**Newly Eligible:** ${eligibilityData.newlyEligible}`,
+        // Current eligibility summary
+        if (automationData.currentlyEligible > 0) {
+            embed.addFields({
+                name: '🎯 Currently Eligible',
+                value: `${automationData.currentlyEligible} user${automationData.currentlyEligible > 1 ? 's' : ''} ready for promotion`,
                 inline: true
-            },
-            {
-                name: '🔧 Action Required',
-                value: `${eligibilityData.totalEligible} promotion${eligibilityData.totalEligible > 1 ? 's' : ''} awaiting HR review`,
-                inline: true
-            }
-        );
+            });
+        }
 
-        // Add newly eligible users
-        if (eligibilityData.newlyEligible > 0 && eligibilityData.eligibleUsers) {
-            const newUsers = eligibilityData.eligibleUsers
+        // If no activity
+        if (automationData.rankLocksExpired === 0 && automationData.currentlyEligible === 0) {
+            embed.addFields({
+                name: '✅ No Action Required',
+                value: 'No rank locks expired and no users are currently eligible for promotion.',
+                inline: false
+            });
+        }
+
+        // 🔧 FIXED: Show currently eligible users with server nicknames
+        if (automationData.eligibilityReport && automationData.eligibilityReport.eligibleUsers.length > 0) {
+            const eligibleList = automationData.eligibilityReport.eligibleUsers
                 .slice(0, 5)
-                .map(user => `• **${user.username}** → ${user.nextRank}`)
+                .map(user => `• **${user.username}** → ${user.nextRank}`) // Uses server nickname from database
                 .join('\n');
             
             embed.addFields({
-                name: '🎯 Newly Eligible Users',
-                value: newUsers + (eligibilityData.newlyEligible > 5 ? `\n... and ${eligibilityData.newlyEligible - 5} more` : ''),
+                name: '🎯 Eligible Users',
+                value: eligibleList + (automationData.eligibilityReport.eligibleUsers.length > 5 ? `\n... and ${automationData.eligibilityReport.eligibleUsers.length - 5} more` : ''),
                 inline: false
             });
         }
@@ -240,6 +335,10 @@ class DailyAutomation {
             name: '🔧 Quick Actions',
             value: '• `/promote-operator list-eligible` - View all eligible users\n• `/promote-operator review user:[name]` - Review specific user\n• `/promote-operator approve user:[name]` - Approve promotion',
             inline: false
+        });
+
+        embed.setFooter({ 
+            text: 'This is an automated daily summary. Immediate notifications are sent when users become eligible.' 
         });
 
         return embed;
@@ -252,7 +351,7 @@ class DailyAutomation {
                 userId: 'SYSTEM',
                 username: 'Daily Automation',
                 eventType: 'daily_automation',
-                description: `Daily automation completed - ${results.rankLocksExpired} locks expired, ${results.notificationsSent} notifications sent, ${results.newlyEligible} newly eligible`,
+                description: `Daily automation completed - ${results.rankLocksExpired} locks expired, ${results.lockNotificationsSent} notifications sent, ${results.currentlyEligible} currently eligible`,
                 pointsAwarded: 0,
                 boostedPoints: false,
                 screenshotUrl: 'SYSTEM_AUTOMATION',
@@ -263,9 +362,8 @@ class DailyAutomation {
                     reason: 'Scheduled daily automation run',
                     automationResults: {
                         rankLocksExpired: results.rankLocksExpired,
-                        notificationsSent: results.notificationsSent,
-                        newlyEligible: results.newlyEligible,
-                        totalEligible: results.totalEligible,
+                        lockNotificationsSent: results.lockNotificationsSent,
+                        currentlyEligible: results.currentlyEligible,
                         hrNotificationSent: results.hrNotificationSent,
                         errorCount: results.errors.length
                     }
@@ -307,7 +405,7 @@ class DailyAutomation {
         }
     }
 
-    // Manual automation trigger (for testing or emergency runs)
+    // 🔧 FIXED: Manual automation trigger (for testing or emergency runs)
     static async runManualAutomation(client, interaction) {
         try {
             await interaction.deferReply({ ephemeral: true });
@@ -331,12 +429,12 @@ class DailyAutomation {
                 .addFields(
                     {
                         name: '🔓 Rank Locks Processed',
-                        value: `${results.rankLocksExpired} expired, ${results.notificationsSent} notified`,
+                        value: `${results.rankLocksExpired} expired, ${results.lockNotificationsSent} notified`,
                         inline: true
                     },
                     {
-                        name: '🎯 Promotion Eligibility',
-                        value: `${results.newlyEligible} newly eligible, ${results.totalEligible} total eligible`,
+                        name: '🎯 Currently Eligible',
+                        value: `${results.currentlyEligible} user${results.currentlyEligible !== 1 ? 's' : ''} ready for promotion`,
                         inline: true
                     },
                     {
@@ -386,7 +484,7 @@ class DailyAutomation {
                 totalRuns: automationLogs.length,
                 totalLocksProcessed: 0,
                 totalNotificationsSent: 0,
-                totalNewlyEligible: 0,
+                totalCurrentlyEligible: 0,
                 averageEligible: 0,
                 lastRun: automationLogs[0]?.submittedAt || null,
                 errorCount: 0
@@ -397,14 +495,14 @@ class DailyAutomation {
                 if (log.hrAction?.automationResults) {
                     const results = log.hrAction.automationResults;
                     stats.totalLocksProcessed += results.rankLocksExpired || 0;
-                    stats.totalNotificationsSent += results.notificationsSent || 0;
-                    stats.totalNewlyEligible += results.newlyEligible || 0;
+                    stats.totalNotificationsSent += results.lockNotificationsSent || 0;
+                    stats.totalCurrentlyEligible += results.currentlyEligible || 0;
                     if (results.errorCount > 0) stats.errorCount++;
                 }
             }
 
             if (automationLogs.length > 0) {
-                stats.averageEligible = Math.round(stats.totalNewlyEligible / automationLogs.length);
+                stats.averageEligible = Math.round(stats.totalCurrentlyEligible / automationLogs.length);
             }
 
             return stats;
