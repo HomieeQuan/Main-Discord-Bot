@@ -191,31 +191,47 @@ class RankSystem {
             };
         }
     
-        // Check rank lock status FIRST before checking points
-        const now = new Date();
-        const isRankLocked = user.rankLockUntil && user.rankLockUntil > now;
+        // ALWAYS calculate requirements for progress bar display
+        const rankPoints = user.rankPoints || 0;
+        const pointsRequired = nextRank.pointsRequired;
+        const hasEnoughPoints = rankPoints >= pointsRequired;
         
-        if (isRankLocked) {
-            const daysRemaining = Math.ceil((user.rankLockUntil - now) / (1000 * 60 * 60 * 24));
-            console.log(`🔒 User ${user.username} is rank locked for ${daysRemaining} more days`);
+        const requirements = {
+            pointsRequired,
+            currentPoints: rankPoints,
+            pointsRemaining: Math.max(0, pointsRequired - rankPoints),
+            met: hasEnoughPoints
+        };
+    
+        // FIXED: Enhanced rank lock check with timezone handling
+        const lockStatus = this.checkRankLockExpiry(user);
+        const isRankLocked = !lockStatus.expired;
+        
+        if (isRankLocked && user.rankLockUntil) {
+            // FIXED: Provide more detailed lock information
+            const lockExpiry = new Date(user.rankLockUntil);
+            const estTime = lockExpiry.toLocaleString('en-US', { 
+                timeZone: 'America/New_York',
+                weekday: 'short',
+                month: 'short', 
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                timeZoneName: 'short'
+            });
             
-            // 🔧 FIXED: Still return requirements even when rank locked (for progress bar display)
-            const rankPoints = user.rankPoints || 0;
-            const pointsRequired = nextRank.pointsRequired;
+            console.log(`🔒 User ${user.username} is rank locked until ${estTime}`);
             
             return {
                 eligible: false,
-                reason: `Rank locked for ${daysRemaining} more days`,
+                reason: `Rank locked until ${estTime}`,
                 rankLocked: true,
-                daysRemaining,
+                daysRemaining: lockStatus.daysRemaining,
+                hoursRemaining: lockStatus.hoursRemaining,
+                lockExpiryFormatted: estTime,
                 currentRank,
                 nextRank,
-                requirements: {
-                    pointsRequired,
-                    currentPoints: rankPoints,
-                    pointsRemaining: Math.max(0, pointsRequired - rankPoints),
-                    met: rankPoints >= pointsRequired
-                }
+                requirements
             };
         }
     
@@ -226,28 +242,19 @@ class RankSystem {
                 reason: 'Executive ranks are hand-picked only',
                 handPickedOnly: true,
                 currentRank,
-                nextRank
+                nextRank,
+                requirements
             };
         }
-    
-        // Check rank points with safe fallback
-        const rankPoints = user.rankPoints || 0;
-        const pointsRequired = nextRank.pointsRequired;
-        const hasEnoughPoints = rankPoints >= pointsRequired;
         
-        console.log(`📊 Eligibility check for ${user.username}: ${rankPoints}/${pointsRequired} rank points, locked: ${isRankLocked}, eligible: ${hasEnoughPoints && !isRankLocked}`);
+        console.log(`📊 Eligibility check for ${user.username}: ${rankPoints}/${pointsRequired} rank points, locked: ${isRankLocked}, eligible: ${hasEnoughPoints}`);
         
         return {
             eligible: hasEnoughPoints,
             reason: hasEnoughPoints ? 'Ready for promotion!' : `Need ${pointsRequired - rankPoints} more rank points`,
             currentRank,
             nextRank,
-            requirements: {
-                pointsRequired,
-                currentPoints: rankPoints,
-                pointsRemaining: Math.max(0, pointsRequired - rankPoints),
-                met: hasEnoughPoints
-            }
+            requirements
         };
     }
 
@@ -335,8 +342,12 @@ class RankSystem {
         const newRank = this.getRankByLevel(newRankLevel);
         
         if (newRank.rankLockDays > 0) {
+            // FIXED: Use UTC and set to a specific time (6 AM UTC) for consistency
             const lockDate = new Date();
-            lockDate.setDate(lockDate.getDate() + newRank.rankLockDays);
+            lockDate.setUTCDate(lockDate.getUTCDate() + newRank.rankLockDays);
+            lockDate.setUTCHours(6, 0, 0, 0); // 6 AM UTC for consistency with automation
+            
+            console.log(`🔒 TIMEZONE: Applied ${newRank.rankLockDays} day lock until ${lockDate.toISOString()} (${lockDate.toLocaleString('en-US', { timeZone: 'America/New_York' })} EST)`);
             
             return {
                 locked: true,
@@ -355,8 +366,13 @@ class RankSystem {
             return { expired: false };
         }
         
-        const now = new Date();
-        const hasExpired = user.rankLockUntil <= now;
+        // FIXED: Use UTC for consistent timezone handling
+        const nowUTC = new Date();
+        const lockExpiryUTC = new Date(user.rankLockUntil);
+        
+        console.log(`🕒 TIMEZONE DEBUG: ${user.username} - Now: ${nowUTC.toISOString()}, Lock expires: ${lockExpiryUTC.toISOString()}`);
+        
+        const hasExpired = lockExpiryUTC <= nowUTC;
         
         if (hasExpired) {
             const wasNotified = user.rankLockNotified;
@@ -367,11 +383,34 @@ class RankSystem {
             };
         }
         
-        const daysRemaining = Math.ceil((user.rankLockUntil - now) / (1000 * 60 * 60 * 24));
-        console.log(`🔒 User ${user.username} rank lock active for ${daysRemaining} more days`);
+        // FIXED: More accurate time calculation + Discord timestamp
+        const timeDiffMs = lockExpiryUTC.getTime() - nowUTC.getTime();
+        const hoursRemaining = Math.ceil(timeDiffMs / (1000 * 60 * 60));
+        const daysRemaining = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24));
+        
+        // ADDED: Discord timestamp for user display
+        const discordTimestamp = Math.floor(lockExpiryUTC.getTime() / 1000);
+        
+        // ADDED: Formatted EST time for notifications/logs
+        const estTime = lockExpiryUTC.toLocaleString('en-US', { 
+            timeZone: 'America/New_York',
+            weekday: 'short',
+            month: 'short', 
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+        
+        console.log(`🔒 User ${user.username} rank lock active for ${daysRemaining} more days (${hoursRemaining} hours) - Expires: ${estTime}`);
+        
         return {
             expired: false,
-            daysRemaining
+            daysRemaining,
+            hoursRemaining,
+            exactExpiryTime: lockExpiryUTC,
+            discordTimestamp, // NEW: For Discord timestamp display
+            estTimeFormatted: estTime // NEW: For notifications
         };
     }
 }

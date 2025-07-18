@@ -489,10 +489,20 @@ module.exports = {
     async listEligibleUsers(interaction) {
         try {
             await interaction.deferReply({ ephemeral: true });
-
+    
+            console.log('🔍 DEBUG: Starting listEligibleUsers function');
+            
             const report = await PromotionChecker.getEligibilityReport();
             
+            console.log('📊 DEBUG: Eligibility report:', {
+                reportExists: !!report,
+                totalEligible: report?.totalEligible || 0,
+                usersArrayLength: report?.eligibleUsers?.length || 0
+            });
+            
             if (!report || report.totalEligible === 0) {
+                console.log('⚠️ DEBUG: No eligible users found');
+                
                 const embed = new EmbedBuilder()
                     .setColor('#ffaa00')
                     .setTitle('📋 Promotion Eligible Users')
@@ -501,43 +511,162 @@ module.exports = {
                         name: '💡 Tip',
                         value: 'Users become eligible when they meet rank point requirements and are not rank locked.',
                         inline: false
+                    })
+                    .addFields({
+                        name: '🔧 Debug Info',
+                        value: `Report exists: ${!!report}\nTotal eligible: ${report?.totalEligible || 0}`,
+                        inline: false
                     });
-
+    
                 return await interaction.editReply({ embeds: [embed] });
             }
-
+    
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('📋 Users Eligible for Promotion')
                 .setDescription(`${report.totalEligible} users are ready for promotion`)
                 .setTimestamp();
-
-            // Show up to 10 eligible users
-            const userList = report.eligibleUsers.slice(0, 10).map(user => {
-                const currentRankEmoji = RankSystem.getRankEmoji(RankSystem.getRankByName(user.currentRank).level);
-                const nextRankEmoji = RankSystem.getRankEmoji(RankSystem.getRankByName(user.nextRank).level);
+    
+            // 🔧 FIXED: Enhanced user list generation with comprehensive error handling
+            if (report.eligibleUsers && report.eligibleUsers.length > 0) {
+                console.log('✅ DEBUG: Processing eligible users:', report.eligibleUsers.map(u => u.username));
                 
-                return `• **${user.username}**: ${currentRankEmoji} ${user.currentRank} → ${nextRankEmoji} ${user.nextRank}\n  └ Points: ${user.rankPoints} | All-time: ${user.allTimePoints}`;
-            }).join('\n\n');
-
-            embed.addFields({
-                name: '🎖️ Eligible Users',
-                value: userList,
-                inline: false
-            });
-
+                // Show up to 10 eligible users with robust error handling
+                const userListArray = [];
+                
+                for (let i = 0; i < Math.min(10, report.eligibleUsers.length); i++) {
+                    const user = report.eligibleUsers[i];
+                    
+                    try {
+                        // Validate user object
+                        if (!user || !user.username) {
+                            console.error(`❌ DEBUG: Invalid user object at index ${i}:`, user);
+                            userListArray.push(`• **[Invalid User ${i}]**: Missing user data`);
+                            continue;
+                        }
+                        
+                        // Validate rank data
+                        if (!user.currentRank || !user.nextRank) {
+                            console.error(`❌ DEBUG: Missing rank data for ${user.username}:`, {
+                                currentRank: user.currentRank,
+                                nextRank: user.nextRank
+                            });
+                            userListArray.push(`• **${user.username}**: Missing rank data - contact admin`);
+                            continue;
+                        }
+                        
+                        // Try to get rank objects
+                        const currentRank = RankSystem.getRankByName(user.currentRank);
+                        const nextRank = RankSystem.getRankByName(user.nextRank);
+                        
+                        if (!currentRank || !nextRank) {
+                            console.error(`❌ DEBUG: Invalid rank names for ${user.username}:`, {
+                                currentRankName: user.currentRank,
+                                nextRankName: user.nextRank,
+                                currentRankFound: !!currentRank,
+                                nextRankFound: !!nextRank
+                            });
+                            
+                            // Show basic info without emojis
+                            userListArray.push(`• **${user.username}**: ${user.currentRank} → ${user.nextRank}\n  └ Points: ${user.rankPoints || 0} | All-time: ${user.allTimePoints || 0}`);
+                            continue;
+                        }
+                        
+                        // Get emojis safely
+                        const currentRankEmoji = RankSystem.getRankEmoji(currentRank.level) || '';
+                        const nextRankEmoji = RankSystem.getRankEmoji(nextRank.level) || '';
+                        
+                        // Create user line with full formatting
+                        const userLine = `• **${user.username}**: ${currentRankEmoji} ${user.currentRank} → ${nextRankEmoji} ${user.nextRank}\n  └ Points: ${user.rankPoints || 0} | All-time: ${user.allTimePoints || 0}`;
+                        userListArray.push(userLine);
+                        
+                        console.log(`✅ DEBUG: Successfully processed ${user.username}`);
+                        
+                    } catch (userError) {
+                        console.error(`❌ DEBUG: Error processing user ${user?.username || 'unknown'}:`, userError);
+                        userListArray.push(`• **${user?.username || 'Unknown User'}**: Error processing data - ${userError.message}`);
+                    }
+                }
+                
+                // Join all user lines
+                const userListText = userListArray.join('\n\n');
+                
+                if (userListText) {
+                    embed.addFields({
+                        name: '🎖️ Eligible Users',
+                        value: userListText,
+                        inline: false
+                    });
+                    console.log('✅ DEBUG: User list added to embed successfully');
+                } else {
+                    console.error('❌ DEBUG: Generated user list is empty');
+                    embed.addFields({
+                        name: '❌ Display Error',
+                        value: 'Found eligible users but failed to format them properly. Check logs.',
+                        inline: false
+                    });
+                }
+                
+            } else {
+                // 🔧 FALLBACK: Manual database check if report shows users but array is empty
+                console.log('⚠️ DEBUG: Report shows eligible users but array is empty, performing manual check...');
+                
+                try {
+                    const manualCheck = await SWATUser.find({ promotionEligible: true }).limit(10);
+                    console.log(`🔍 DEBUG: Manual check found ${manualCheck.length} users with promotionEligible: true`);
+                    
+                    if (manualCheck.length > 0) {
+                        const manualList = manualCheck.map((user, index) => {
+                            try {
+                                const formattedRank = RankSystem.formatRank(user);
+                                return `• **${user.username}**: ${formattedRank} (${user.rankPoints || 0} pts)`;
+                            } catch (formatError) {
+                                console.error(`❌ DEBUG: Error formatting user ${user.username}:`, formatError);
+                                return `• **${user.username}**: Rank formatting error (${user.rankPoints || 0} pts)`;
+                            }
+                        }).join('\n');
+                        
+                        embed.addFields({
+                            name: '🎖️ Eligible Users (Manual Check)',
+                            value: manualList,
+                            inline: false
+                        });
+                        
+                        embed.addFields({
+                            name: '⚠️ Note',
+                            value: 'Using fallback method - there may be an issue with the eligibility report system.',
+                            inline: false
+                        });
+                    } else {
+                        embed.addFields({
+                            name: '❌ No Users Found',
+                            value: 'Both automatic and manual checks found no eligible users. This may indicate a database issue.',
+                            inline: false
+                        });
+                    }
+                } catch (manualError) {
+                    console.error('❌ DEBUG: Manual check failed:', manualError);
+                    embed.addFields({
+                        name: '❌ System Error',
+                        value: 'Failed to retrieve eligible users. Please contact an administrator.',
+                        inline: false
+                    });
+                }
+            }
+    
+            // Show total count if more than 10
             if (report.totalEligible > 10) {
                 embed.addFields({
                     name: '📊 Total',
-                    value: `Showing 10 of ${report.totalEligible} eligible users`,
+                    value: `Showing up to 10 of ${report.totalEligible} eligible users`,
                     inline: false
                 });
             }
-
-            // Show breakdown by target rank
-            if (Object.keys(report.byRank).length > 0) {
+    
+            // Show breakdown by target rank if available
+            if (report.byRank && Object.keys(report.byRank).length > 0) {
                 const rankBreakdown = Object.entries(report.byRank)
-                    .map(([rank, count]) => `• ${rank}: ${count} users`)
+                    .map(([rank, count]) => `• ${rank}: ${count} user${count > 1 ? 's' : ''}`)
                     .join('\n');
                 
                 embed.addFields({
@@ -546,18 +675,39 @@ module.exports = {
                     inline: false
                 });
             }
-
+    
+            // HR action commands
             embed.addFields({
                 name: '🔧 HR Actions',
                 value: '• `/promote-operator review user:[name]` - Review specific user\n• `/promote-operator approve user:[name]` - Approve promotion\n• `/promote-operator deny user:[name] reason:[reason]` - Deny promotion',
                 inline: false
             });
-
+    
             await interaction.editReply({ embeds: [embed] });
-
+            console.log('✅ DEBUG: listEligibleUsers completed successfully');
+    
         } catch (error) {
-            console.error('❌ List eligible users error:', error);
-            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to retrieve eligible users.');
+            console.error('❌ DEBUG: List eligible users error:', error);
+            
+            // Create detailed error embed for debugging
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#ff0000')
+                .setTitle('❌ Error: Failed to retrieve eligible users')
+                .setDescription('An error occurred while fetching promotion-eligible users.')
+                .addFields(
+                    {
+                        name: '🐛 Error Details',
+                        value: `\`\`\`${error.message}\`\`\``,
+                        inline: false
+                    },
+                    {
+                        name: '🔧 Troubleshooting',
+                        value: '• Check bot logs for detailed error information\n• Verify database connection\n• Try again in a few moments\n• Contact administrator if issue persists',
+                        inline: false
+                    }
+                )
+                .setTimestamp();
+                
             await interaction.editReply({ embeds: [errorEmbed] });
         }
     },

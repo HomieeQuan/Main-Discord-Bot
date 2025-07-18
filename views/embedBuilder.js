@@ -224,6 +224,8 @@ class SWATEmbeds {
     }
 
     // 🔧 FIXED: Fallback basic personal stats embed with clean rank lock display
+    // COMBINED FIX: File 2: views/embedBuilder.js - Enhanced createPersonalStatsEmbed
+
     static createPersonalStatsEmbed(user, discordUser, weeklyRank, allTimeRank, recentEvents = [], isPersonalStats = true) {
         try {
             const RankSystem = require('../utils/rankSystem');
@@ -233,7 +235,7 @@ class SWATEmbeds {
                 .setColor(user.quotaCompleted ? '#00ff00' : '#ffa500')
                 .setTitle(`📊 ${user.username}'s SWAT Statistics`)
                 .setThumbnail(discordUser.displayAvatarURL());
-    
+
             // Current rank display
             const currentRank = RankSystem.formatRank(user);
             embed.addFields({
@@ -241,20 +243,26 @@ class SWATEmbeds {
                 value: currentRank,
                 inline: true
             });
-    
-            // 🔧 FIXED: Clean rank lock status display with safe null checks
+
+            // 🔧 COMBINED: Enhanced rank lock status display with Discord timestamps + timezone info
             const lockStatus = RankSystem.checkRankLockExpiry(user);
             
             // Only show rank lock field if user is actually locked
             if (!lockStatus.expired && lockStatus.daysRemaining && user.rankLockUntil) {
+                // COMBINED: Use Discord timestamp for user display + EST for debug logs
+                const discordTimestamp = lockStatus.discordTimestamp || Math.floor(new Date(user.rankLockUntil).getTime() / 1000);
+                
                 embed.addFields({
                     name: '🔒 Rank Lock',
-                    value: `${lockStatus.daysRemaining} day${lockStatus.daysRemaining > 1 ? 's' : ''} remaining`,
+                    value: `Expires <t:${discordTimestamp}:R> (<t:${discordTimestamp}:f>)`,
                     inline: true
                 });
+                
+                // Enhanced logging with timezone info
+                console.log(`🔒 DISPLAY: ${user.username} rank lock shown as Discord timestamp ${discordTimestamp} (${lockStatus.estTimeFormatted || 'EST format unavailable'})`);
             }
-    
-            // 🔧 FIXED: Rank progression with safe null checks (only for non-Executive ranks)
+
+            // Rank progression (only for non-Executive ranks)
             if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
                 const rankProgress = RankSystem.createRankProgressBar(user);
                 embed.addFields({
@@ -269,15 +277,58 @@ class SWATEmbeds {
                     inline: false
                 });
             }
-    
-            // 🔧 FIXED: Weekly quota progress with safe null checks
+
+            // 🔧 COMBINED: Enhanced promotion eligibility with Discord timestamps + timezone logging
+            const eligibility = RankSystem.checkPromotionEligibility(user);
+
+            // Show promotion status for users who aren't at max rank
+            if (eligibility.nextRank && !RankSystem.isExecutiveOrHigher(user.rankLevel)) {
+                // Check if user meets point requirements (regardless of rank lock)
+                const pointsCheck = RankSystem.checkPointRequirements(user);
+                
+                if (pointsCheck.pointsMet && !eligibility.rankLocked) {
+                    // User has enough points and is NOT rank locked - fully eligible!
+                    embed.addFields({
+                        name: '🎯 Promotion Available!',
+                        value: `✅ **ELIGIBLE** for promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}**! Contact HR for review.`,
+                        inline: false
+                    });
+                    
+                    console.log(`🎯 PROMOTION DISPLAY: ${user.username} shown as fully eligible for ${eligibility.nextRank.name}`);
+                    
+                } else if (pointsCheck.pointsMet && eligibility.rankLocked) {
+                    // User has enough points but IS rank locked - use Discord timestamp
+                    const discordTimestamp = eligibility.discordTimestamp || Math.floor(new Date(user.rankLockUntil).getTime() / 1000);
+                    
+                    embed.addFields({
+                        name: '🎯 Promotion Status',
+                        value: `✅ **Point requirements met!** You'll be eligible for promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}** when your rank lock expires <t:${discordTimestamp}:R>.`,
+                        inline: false
+                    });
+                    
+                    console.log(`🎯 PROMOTION DISPLAY: ${user.username} has points but rank locked until ${eligibility.lockExpiryFormatted || 'unknown time'} (Discord timestamp: ${discordTimestamp})`);
+                    
+                } else if (!pointsCheck.pointsMet && eligibility.requirements) {
+                    // User still needs more points
+                    const pointsNeeded = eligibility.requirements.pointsRemaining;
+                    embed.addFields({
+                        name: '📈 Next Promotion',
+                        value: `${pointsNeeded} more rank points needed for ${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}`,
+                        inline: false
+                    });
+                    
+                    console.log(`📈 PROMOTION DISPLAY: ${user.username} needs ${pointsNeeded} more points for ${eligibility.nextRank.name}`);
+                }
+            }
+
+            // Weekly quota progress
             embed.addFields({
                 name: '🎯 Weekly Quota Progress',
-                value: ProgressBarGenerator.createQuotaProgressBar(user.weeklyPoints || 0, user.weeklyQuota || 10),
+                value: ProgressBarGenerator.createQuotaProgressBar(user.weeklyPoints, user.weeklyQuota),
                 inline: false
             });
-    
-            // 🔧 FIXED: Performance stats with safe null checks
+
+            // Performance stats
             embed.addFields(
                 { 
                     name: '🏆 Weekly Rank', 
@@ -286,7 +337,7 @@ class SWATEmbeds {
                 },
                 { 
                     name: '⭐ All-Time Points', 
-                    value: `${user.allTimePoints || 0} points`, 
+                    value: `${user.allTimePoints} points`, 
                     inline: true 
                 },
                 { 
@@ -296,7 +347,7 @@ class SWATEmbeds {
                 },
                 { 
                     name: '📊 Events This Week', 
-                    value: `${user.weeklyEvents || 0} events`, 
+                    value: `${user.weeklyEvents} events`, 
                     inline: true 
                 },
                 { 
@@ -306,31 +357,20 @@ class SWATEmbeds {
                 },
                 { 
                     name: '📈 Total Events', 
-                    value: `${user.totalEvents || 0} events`, 
+                    value: `${user.totalEvents} events`, 
                     inline: true 
                 }
             );
-    
-            // 🔧 FIXED: Promotion eligibility notification with safe checks
-            if (user.promotionEligible) {
-                const eligibility = RankSystem.checkPromotionEligibility(user);
-                if (eligibility.eligible && eligibility.nextRank) {
-                    embed.addFields({
-                        name: '🎯 Promotion Available!',
-                        value: `Eligible for promotion to **${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}**! Contact HR for review.`,
-                        inline: false
-                    });
-                }
-            }
-    
+
             embed.setFooter({ 
                 text: user.isBooster ? 'Server Booster (2x Points) 💎' : 'Standard Points' 
             }).setTimestamp();
-    
+
             // Add recent events with attendees info
             if (recentEvents.length > 0) {
                 const recentEventsText = recentEvents
                     .map(event => {
+                        const PointCalculator = require('../utils/pointCalculator');
                         const eventName = PointCalculator.getEventName(event.eventType);
                         let line = `• ${eventName} (${event.pointsAwarded}pts)`;
                         
@@ -349,7 +389,7 @@ class SWATEmbeds {
                     inline: false 
                 });
             }
-    
+
             return embed;
             
         } catch (error) {
