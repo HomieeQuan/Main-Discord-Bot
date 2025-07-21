@@ -66,9 +66,39 @@ module.exports = {
 
             console.log(`📊 Found ${events.length} events for ${targetDisplayName}`);
 
-            // FIXED: Filter events that have valid screenshots using new method
+            // FIXED: Helper function to get all screenshot URLs (handles both formats)
+            const getAllScreenshotUrls = (event) => {
+                // Check for screenshots in the new format (screenshotUrls array)
+                if (event.screenshotUrls && Array.isArray(event.screenshotUrls) && event.screenshotUrls.length > 0) {
+                    // Filter out system/HR URLs
+                    const validUrls = event.screenshotUrls.filter(url => 
+                        url && 
+                        url !== 'HR_ADJUSTMENT' && 
+                        url !== 'HR_CRITICAL_ADJUSTMENT' &&
+                        url !== 'AUTO_BOOSTER_SYNC' &&
+                        !url.startsWith('HR_') &&
+                        !url.startsWith('SYSTEM_')
+                    );
+                    return validUrls;
+                }
+                
+                // Check for screenshots in the old format (single screenshotUrl)
+                if (event.screenshotUrl && 
+                    event.screenshotUrl !== 'HR_ADJUSTMENT' && 
+                    event.screenshotUrl !== 'HR_CRITICAL_ADJUSTMENT' &&
+                    event.screenshotUrl !== 'AUTO_BOOSTER_SYNC' &&
+                    !event.screenshotUrl.startsWith('HR_') &&
+                    !event.screenshotUrl.startsWith('SYSTEM_')) {
+                    return [event.screenshotUrl]; // Convert single URL to array
+                }
+                
+                return []; // No valid screenshots
+            };
+
+            // FIXED: Filter events that have valid screenshots using new logic
             const eventsWithScreenshots = events.filter(event => {
-                return event.hasValidScreenshots ? event.hasValidScreenshots() : false;
+                const urls = getAllScreenshotUrls(event);
+                return urls.length > 0;
             });
 
             if (eventsWithScreenshots.length === 0) {
@@ -93,9 +123,10 @@ module.exports = {
                 return await interaction.editReply({ embeds: [noEventsEmbed] });
             }
 
-            // FIXED: Calculate total screenshot count
+            // FIXED: Calculate total screenshot count properly
             const totalScreenshots = eventsWithScreenshots.reduce((sum, event) => {
-                return sum + (event.getAllScreenshotUrls ? event.getAllScreenshotUrls().length : 0);
+                const urls = getAllScreenshotUrls(event);
+                return sum + urls.length;
             }, 0);
 
             // Send intro message
@@ -138,8 +169,8 @@ module.exports = {
                 const event = eventsWithScreenshots[eventIndex];
                 
                 try {
-                    // Get all screenshot URLs for this event
-                    const screenshotUrls = event.getAllScreenshotUrls ? event.getAllScreenshotUrls() : [];
+                    // Get all screenshot URLs for this event using helper function
+                    const screenshotUrls = getAllScreenshotUrls(event);
                     
                     if (screenshotUrls.length === 0) continue;
 

@@ -1,4 +1,4 @@
-// commands/audit-user.js - CLEAN HR auditing workflow - NO LIMITS
+// commands/audit-user.js - COMPLETE FIXED VERSION - handles both old and new screenshot formats
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
@@ -110,15 +110,40 @@ module.exports = {
                 submittedAt: { $gte: dateLimit }
             }).sort({ submittedAt: -1 });
 
-            // Get ALL events with valid screenshots - NO LIMIT
-            const eventsWithScreenshots = events.filter(event => 
-                event.screenshotUrl && 
-                event.screenshotUrl !== 'HR_ADJUSTMENT' && 
-                event.screenshotUrl !== 'HR_CRITICAL_ADJUSTMENT' &&
-                event.screenshotUrl !== 'AUTO_BOOSTER_SYNC' &&
-                !event.screenshotUrl.startsWith('HR_') &&
-                !event.screenshotUrl.startsWith('SYSTEM_')
-            );
+            // FIXED: Helper function to get all screenshot URLs (handles both formats)
+            const getAllScreenshotUrls = (event) => {
+                // Check for screenshots in the new format (screenshotUrls array)
+                if (event.screenshotUrls && Array.isArray(event.screenshotUrls) && event.screenshotUrls.length > 0) {
+                    // Filter out system/HR URLs
+                    const validUrls = event.screenshotUrls.filter(url => 
+                        url && 
+                        url !== 'HR_ADJUSTMENT' && 
+                        url !== 'HR_CRITICAL_ADJUSTMENT' &&
+                        url !== 'AUTO_BOOSTER_SYNC' &&
+                        !url.startsWith('HR_') &&
+                        !url.startsWith('SYSTEM_')
+                    );
+                    return validUrls;
+                }
+                
+                // Check for screenshots in the old format (single screenshotUrl)
+                if (event.screenshotUrl && 
+                    event.screenshotUrl !== 'HR_ADJUSTMENT' && 
+                    event.screenshotUrl !== 'HR_CRITICAL_ADJUSTMENT' &&
+                    event.screenshotUrl !== 'AUTO_BOOSTER_SYNC' &&
+                    !event.screenshotUrl.startsWith('HR_') &&
+                    !event.screenshotUrl.startsWith('SYSTEM_')) {
+                    return [event.screenshotUrl]; // Convert single URL to array
+                }
+                
+                return []; // No valid screenshots
+            };
+
+            // FIXED: Get ALL events with valid screenshots using new logic
+            const eventsWithScreenshots = events.filter(event => {
+                const urls = getAllScreenshotUrls(event);
+                return urls.length > 0;
+            });
 
             const weeklyRank = await SWATUser.countDocuments({ 
                 weeklyPoints: { $gt: user.weeklyPoints } 
@@ -200,7 +225,7 @@ module.exports = {
                 }
             );
 
-      // Add rank progression info
+        // Add rank progression info
         if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
             // Ensure rankPoints is properly set - SIMPLIFIED FIX
             const safeUser = {
@@ -297,9 +322,15 @@ module.exports = {
                     line += ` [${event.attendeesPassed} passed]`;
                 }
 
-                const hasScreenshot = event.screenshotUrl && 
-                                    !event.screenshotUrl.startsWith('HR_') && 
-                                    !event.screenshotUrl.startsWith('SYSTEM_');
+                // FIXED: Check for screenshots using both formats
+                const hasScreenshot = (event.screenshotUrls && Array.isArray(event.screenshotUrls) && event.screenshotUrls.length > 0) ||
+                                    (event.screenshotUrl && 
+                                     event.screenshotUrl !== 'HR_ADJUSTMENT' && 
+                                     event.screenshotUrl !== 'HR_CRITICAL_ADJUSTMENT' &&
+                                     event.screenshotUrl !== 'AUTO_BOOSTER_SYNC' &&
+                                     !event.screenshotUrl.startsWith('HR_') && 
+                                     !event.screenshotUrl.startsWith('SYSTEM_'));
+                                     
                 if (hasScreenshot) line += ' 📸';
 
                 return line;
@@ -316,11 +347,16 @@ module.exports = {
         }
 
         const totalPoints = events.reduce((sum, e) => sum + e.pointsAwarded, 0);
-        const eventsWithScreenshots = events.filter(e => 
-            e.screenshotUrl && 
-            !e.screenshotUrl.startsWith('HR_') && 
-            !e.screenshotUrl.startsWith('SYSTEM_')
-        ).length;
+        // FIXED: Count screenshots using new logic
+        const eventsWithScreenshots = events.filter(e => {
+            return (e.screenshotUrls && Array.isArray(e.screenshotUrls) && e.screenshotUrls.length > 0) ||
+                   (e.screenshotUrl && 
+                    e.screenshotUrl !== 'HR_ADJUSTMENT' && 
+                    e.screenshotUrl !== 'HR_CRITICAL_ADJUSTMENT' &&
+                    e.screenshotUrl !== 'AUTO_BOOSTER_SYNC' &&
+                    !e.screenshotUrl.startsWith('HR_') && 
+                    !e.screenshotUrl.startsWith('SYSTEM_'));
+        }).length;
 
         embed.addFields({
             name: '📊 Summary',
@@ -340,11 +376,46 @@ module.exports = {
         try {
             console.log(`📸 Sending ALL ${eventsWithScreenshots.length} screenshots...`);
 
+            // FIXED: Helper function to get all screenshot URLs (handles both formats)
+            const getAllScreenshotUrls = (event) => {
+                // Check for screenshots in the new format (screenshotUrls array)
+                if (event.screenshotUrls && Array.isArray(event.screenshotUrls) && event.screenshotUrls.length > 0) {
+                    // Filter out system/HR URLs
+                    const validUrls = event.screenshotUrls.filter(url => 
+                        url && 
+                        url !== 'HR_ADJUSTMENT' && 
+                        url !== 'HR_CRITICAL_ADJUSTMENT' &&
+                        url !== 'AUTO_BOOSTER_SYNC' &&
+                        !url.startsWith('HR_') &&
+                        !url.startsWith('SYSTEM_')
+                    );
+                    return validUrls;
+                }
+                
+                // Check for screenshots in the old format (single screenshotUrl)
+                if (event.screenshotUrl && 
+                    event.screenshotUrl !== 'HR_ADJUSTMENT' && 
+                    event.screenshotUrl !== 'HR_CRITICAL_ADJUSTMENT' &&
+                    event.screenshotUrl !== 'AUTO_BOOSTER_SYNC' &&
+                    !event.screenshotUrl.startsWith('HR_') &&
+                    !event.screenshotUrl.startsWith('SYSTEM_')) {
+                    return [event.screenshotUrl]; // Convert single URL to array
+                }
+                
+                return []; // No valid screenshots
+            };
+
+            // FIXED: Calculate total screenshots properly
+            const totalScreenshots = eventsWithScreenshots.reduce((sum, event) => {
+                const urls = getAllScreenshotUrls(event);
+                return sum + urls.length;
+            }, 0);
+
             // Send intro message
             const introEmbed = new EmbedBuilder()
                 .setColor('#0099ff')
                 .setTitle('📸 All Event Screenshots')
-                .setDescription(`Displaying all ${eventsWithScreenshots.length} screenshots for ${interaction.guild.members.cache.get(targetUser.id)?.displayName || targetUser.username}`)
+                .setDescription(`Displaying all ${totalScreenshots} screenshots for ${interaction.guild.members.cache.get(targetUser.id)?.displayName || targetUser.username}`)
                 .addFields({
                     name: '📋 Info',
                     value: 'Screenshots will appear below. Please wait for all to load.',
@@ -354,10 +425,17 @@ module.exports = {
             await interaction.followUp({ embeds: [introEmbed], ephemeral: true });
 
             // Send each screenshot
+            let overallScreenshotIndex = 0;
+            
             for (let i = 0; i < eventsWithScreenshots.length; i++) {
                 const event = eventsWithScreenshots[i];
                 
                 try {
+                    // Get all screenshot URLs for this event using helper function
+                    const screenshotUrls = getAllScreenshotUrls(event);
+                    
+                    if (screenshotUrls.length === 0) continue;
+
                     const eventName = PointCalculator.getEventName(event.eventType);
                     const submissionDate = event.submittedAt.toLocaleDateString();
                     const submissionTime = event.submittedAt.toLocaleTimeString('en-US', { 
@@ -365,34 +443,51 @@ module.exports = {
                         minute: '2-digit' 
                     });
 
-                    const eventEmbed = new EmbedBuilder()
-                        .setColor(event.boostedPoints ? '#ff6600' : '#00ff00')
-                        .setTitle(`📸 ${i + 1}/${eventsWithScreenshots.length}: ${eventName}`)
-                        .setDescription(`**Description:** ${event.description || 'No description provided'}`)
-                        .addFields(
-                            { name: '🎯 Points', value: `${event.pointsAwarded} pts`, inline: true },
-                            { name: '💎 Booster', value: event.boostedPoints ? '2x Yes' : 'No', inline: true },
-                            { name: '📅 Date', value: `${submissionDate} ${submissionTime}`, inline: true }
-                        )
-                        .setImage(event.screenshotUrl)
-                        .setFooter({ text: `Screenshot ${i + 1} of ${eventsWithScreenshots.length}` });
+                    // FIXED: Send each screenshot individually with proper numbering
+                    for (let screenshotIndex = 0; screenshotIndex < screenshotUrls.length; screenshotIndex++) {
+                        const screenshotUrl = screenshotUrls[screenshotIndex];
+                        overallScreenshotIndex++;
 
-                    // Add attendees info for tryouts
-                    if (event.attendeesPassed && event.attendeesPassed > 0) {
-                        eventEmbed.addFields({
-                            name: '👥 Attendees Passed',
-                            value: `${event.attendeesPassed} (+${event.attendeesPassed} bonus points)`,
-                            inline: true
-                        });
-                    }
+                        const eventEmbed = new EmbedBuilder()
+                            .setColor(event.boostedPoints ? '#ff6600' : '#00ff00')
+                            .setTitle(`📸 ${overallScreenshotIndex}/${totalScreenshots}: ${eventName}`)
+                            .setDescription(`**Description:** ${event.description || 'No description provided'}`)
+                            .addFields(
+                                { name: '🎯 Points', value: `${event.pointsAwarded} pts`, inline: true },
+                                { name: '💎 Booster', value: event.boostedPoints ? '2x Yes' : 'No', inline: true },
+                                { name: '📅 Date', value: `${submissionDate} ${submissionTime}`, inline: true }
+                            )
+                            .setImage(screenshotUrl)
+                            .setFooter({ 
+                                text: `Screenshot ${screenshotIndex + 1} of ${screenshotUrls.length} for this event • Event ${i + 1}/${eventsWithScreenshots.length}` 
+                            });
 
-                    await interaction.followUp({ embeds: [eventEmbed], ephemeral: true });
-                    
-                    console.log(`📸 Sent screenshot ${i + 1}/${eventsWithScreenshots.length}: ${eventName}`);
-                    
-                    // Rate limiting delay
-                    if (i < eventsWithScreenshots.length - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 800));
+                        // Add quantity info if more than 1
+                        if (event.quantity && event.quantity > 1) {
+                            eventEmbed.addFields({
+                                name: '🔢 Quantity',
+                                value: `x${event.quantity}`,
+                                inline: true
+                            });
+                        }
+
+                        // Add attendees info for tryouts
+                        if (event.attendeesPassed && event.attendeesPassed > 0) {
+                            eventEmbed.addFields({
+                                name: '👥 Attendees Passed',
+                                value: `${event.attendeesPassed} (+${event.attendeesPassed} bonus points)`,
+                                inline: true
+                            });
+                        }
+
+                        await interaction.followUp({ embeds: [eventEmbed], ephemeral: true });
+                        
+                        console.log(`📸 Sent screenshot ${overallScreenshotIndex}/${totalScreenshots}: ${eventName}`);
+                        
+                        // Rate limiting delay
+                        if (overallScreenshotIndex < totalScreenshots) {
+                            await new Promise(resolve => setTimeout(resolve, 800));
+                        }
                     }
                     
                 } catch (screenshotError) {
@@ -415,7 +510,7 @@ module.exports = {
             const completionEmbed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('✅ All Screenshots Displayed')
-                .setDescription(`Completed showing all ${eventsWithScreenshots.length} screenshots.`);
+                .setDescription(`Completed showing all ${totalScreenshots} screenshots.`);
 
             await interaction.followUp({ embeds: [completionEmbed], ephemeral: true });
 

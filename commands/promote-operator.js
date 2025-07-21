@@ -1,4 +1,4 @@
-// commands/promote-operator.js - FIXED force promotion rank lock bug
+// commands/promote-operator.js - FIXED force promotion permissions to allow HR+ instead of Commander+ only
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
@@ -50,7 +50,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('force')
-                .setDescription('Force promote user to any rank (emergency use)')
+                .setDescription('🔧 FIXED: Force promote user (HR+ can now use this)')
                 .addUserOption(option =>
                     option.setName('user')
                         .setDescription('User to force promote')
@@ -129,13 +129,39 @@ module.exports = {
         .setDMPermission(false),
 
     async execute(interaction) {
-        // Check HR permission
+        // Check HR permission for all promotion commands
         if (!PermissionChecker.canManageSystem(interaction.member)) {
             const errorEmbed = SWATEmbeds.createErrorEmbed('🚫 Only HR can use promotion commands!');
             return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
 
         const subcommand = interaction.options.getSubcommand();
+
+        // 🔧 ISSUE #5 FIX: Force promotion now has separate permission check
+        if (subcommand === 'force') {
+            // Check specific force promotion permission (now allows HR+)
+            if (!PermissionChecker.canForcePromotions(interaction.member)) {
+                const errorMessage = PermissionChecker.getPermissionErrorMessage('hr');
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#ff0000')
+                    .setTitle('🚫 Force Promotion Access Denied')
+                    .setDescription(errorMessage)
+                    .addFields({
+                        name: '🎯 Required Permission Level',
+                        value: '**HR | Executive Operator** or higher role required for force promotions',
+                        inline: false
+                    })
+                    .addFields({
+                        name: '✅ What Changed',
+                        value: 'Force promotions are now available to all HR+ roles (previously Commander+ only)',
+                        inline: false
+                    })
+                    .setFooter({ text: 'This change allows HR team flexibility in promotion management' })
+                    .setTimestamp();
+                
+                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+        }
 
         switch (subcommand) {
             case 'review':
@@ -259,7 +285,7 @@ module.exports = {
             } else if (lockStatus.daysRemaining) {
                 embed.addFields({
                     name: '🔧 HR Actions',
-                    value: `\`/promote-operator bypass-lock user:${user.username} reason:[reason]\` - Remove rank lock`,
+                    value: `\`/promote-operator bypass-lock user:${user.username} reason:[reason]\` - Remove rank lock\n\`/promote-operator force user:${user.username} rank:[rank] reason:[reason]\` - Force promote (HR+)`,
                     inline: false
                 });
             }
@@ -301,7 +327,7 @@ module.exports = {
                     },
                     {
                         name: '💡 Options',
-                        value: `• Use \`review\` to see detailed requirements\n• Use \`force\` to override requirements\n• Use \`bypass-lock\` to remove rank lock`,
+                        value: `• Use \`review\` to see detailed requirements\n• Use \`force\` to override requirements (HR+)\n• Use \`bypass-lock\` to remove rank lock`,
                         inline: false
                     });
                 
@@ -527,7 +553,7 @@ module.exports = {
                 .setDescription(`${report.totalEligible} users are ready for promotion`)
                 .setTimestamp();
     
-            // 🔧 FIXED: Enhanced user list generation with comprehensive error handling
+            // Enhanced user list generation with comprehensive error handling
             if (report.eligibleUsers && report.eligibleUsers.length > 0) {
                 console.log('✅ DEBUG: Processing eligible users:', report.eligibleUsers.map(u => u.username));
                 
@@ -608,7 +634,7 @@ module.exports = {
                 }
                 
             } else {
-                // 🔧 FALLBACK: Manual database check if report shows users but array is empty
+                // Fallback: Manual database check if report shows users but array is empty
                 console.log('⚠️ DEBUG: Report shows eligible users but array is empty, performing manual check...');
                 
                 try {
@@ -676,10 +702,10 @@ module.exports = {
                 });
             }
     
-            // HR action commands
+            // 🔧 UPDATED HR action commands to reflect new force promotion permissions
             embed.addFields({
                 name: '🔧 HR Actions',
-                value: '• `/promote-operator review user:[name]` - Review specific user\n• `/promote-operator approve user:[name]` - Approve promotion\n• `/promote-operator deny user:[name] reason:[reason]` - Deny promotion',
+                value: '• `/promote-operator review user:[name]` - Review specific user\n• `/promote-operator approve user:[name]` - Approve promotion\n• `/promote-operator deny user:[name] reason:[reason]` - Deny promotion\n• `/promote-operator force user:[name] rank:[rank] reason:[reason]` - Force promote (HR+)',
                 inline: false
             });
     
@@ -712,13 +738,19 @@ module.exports = {
         }
     },
 
-    // 🔧 FIXED: Force promotion now properly applies rank locks
+    // 🔧 ISSUE #5 MAIN FIX: Force promotion now available to HR+ and properly applies rank locks
     async forcePromote(interaction) {
         const targetUser = interaction.options.getUser('user');
         const targetRankName = interaction.options.getString('rank');
         const reason = interaction.options.getString('reason');
         
         try {
+            // Double-check force promotion permission (redundant but safe)
+            if (!PermissionChecker.canForcePromotions(interaction.member)) {
+                const errorEmbed = SWATEmbeds.createErrorEmbed('🚫 You do not have permission to use force promotions!');
+                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            }
+
             const user = await SWATUser.findOne({ discordId: targetUser.id });
             if (!user) {
                 const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
@@ -738,14 +770,14 @@ module.exports = {
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            // 🔧 CRITICAL FIX: Apply rank lock for force promotions
+            // Apply force promotion with proper rank lock
             const oldRank = currentRank;
             user.rankName = targetRank.name;
             user.rankLevel = targetRank.level;
             user.rankPoints = 0; // Reset rank points
             user.promotionEligible = false;
             
-            // 🔧 FIXED: Apply proper rank lock instead of setting to null
+            // Apply proper rank lock instead of setting to null
             const lockResult = RankSystem.applyRankLock(user, targetRank.level);
             console.log(`🔧 Force promotion lock result:`, lockResult);
             
@@ -776,10 +808,9 @@ module.exports = {
                     hrUsername: interaction.user.username
                 },
                 promotionType: 'force',
-                reason: `FORCE PROMOTION: ${reason}`,
+                reason: `FORCE PROMOTION (HR+): ${reason}`, // 🔧 Updated reason to reflect HR+ access
                 rankPointsAtPromotion: user.rankPoints,
                 allTimePointsAtPromotion: user.allTimePoints,
-                // 🔧 FIXED: Include rank lock info in history
                 rankLockApplied: lockResult.locked ? {
                     days: lockResult.lockDays,
                     until: lockResult.lockUntil
@@ -793,40 +824,40 @@ module.exports = {
                 userId: targetUser.id,
                 username: user.username,
                 eventType: 'force_promotion',
-                description: `FORCE PROMOTED: ${oldRank.name} → ${targetRank.name} - ${reason}`,
+                description: `FORCE PROMOTED (HR+): ${oldRank.name} → ${targetRank.name} - ${reason}`, // 🔧 Updated description
                 pointsAwarded: 0,
                 boostedPoints: false,
                 screenshotUrl: 'HR_FORCE_PROMOTION',
                 hrAction: {
                     hrUser: interaction.user.id,
                     hrUsername: interaction.user.username,
-                    action: 'force_promotion',
+                    action: 'force_promotion_hr_plus', // 🔧 Updated action type
                     reason: reason,
                     oldRank: oldRank.name,
                     newRank: targetRank.name,
-                    // 🔧 FIXED: Log rank lock info
                     rankLockApplied: lockResult.locked ? lockResult.lockDays : 0,
-                    rankLockUntil: lockResult.locked ? lockResult.lockUntil : null
+                    rankLockUntil: lockResult.locked ? lockResult.lockUntil : null,
+                    performedBy: 'HR_PLUS' // 🔧 Track that this was done by HR+ not Commander+
                 }
             });
 
             await auditLog.save();
 
             // Create response embed
-            const warningEmbed = new EmbedBuilder()
+            const successEmbed = new EmbedBuilder()
                 .setColor('#ff6600')
-                .setTitle('⚠️ Force Promotion Completed')
-                .setDescription(`**${user.username}** has been force promoted!`)
+                .setTitle('⚡ Force Promotion Completed (HR+)') // 🔧 Updated title
+                .setDescription(`**${user.username}** has been force promoted by HR!`)
                 .setThumbnail(targetUser.displayAvatarURL())
                 .addFields(
                     { 
-                        name: '🚨 Force Promotion', 
+                        name: '🚀 Force Promotion', 
                         value: `${RankSystem.getRankEmoji(oldRank.level)} ${oldRank.name} → ${RankSystem.getRankEmoji(targetRank.level)} ${targetRank.name}`, 
                         inline: false 
                     },
                     { 
                         name: '👤 Force Promoted By', 
-                        value: interaction.user.username, 
+                        value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, // 🔧 Show role
                         inline: true 
                     },
                     { 
@@ -845,33 +876,33 @@ module.exports = {
                         inline: false 
                     },
                     { 
-                        name: '⚠️ Notice', 
-                        value: 'This was a force promotion that bypassed normal requirements.', 
+                        name: '✅ Permission Level', 
+                        value: '**HR+** force promotion (updated from Commander+ only)', // 🔧 Highlight the change
                         inline: false 
                     }
                 );
 
-            // 🔧 FIXED: Show rank lock status in force promotion response
+            // Show rank lock status in force promotion response
             if (lockResult.locked) {
-                warningEmbed.addFields({
+                successEmbed.addFields({
                     name: '🔒 Rank Lock Applied',
                     value: `${lockResult.lockDays} days until next promotion eligibility`,
                     inline: false
                 });
             } else {
-                warningEmbed.addFields({
+                successEmbed.addFields({
                     name: '🔓 Rank Lock Status',
                     value: 'No rank lock (Executive+ rank)',
                     inline: false
                 });
             }
 
-            warningEmbed.setFooter({ text: 'Force promotion logged in audit trail' })
+            successEmbed.setFooter({ text: 'Force promotion logged in audit trail' })
                         .setTimestamp();
 
-            await interaction.reply({ embeds: [warningEmbed] });
+            await interaction.reply({ embeds: [successEmbed] });
 
-            console.log(`🚨 FORCE PROMOTION: ${user.username} force promoted from ${oldRank.name} to ${targetRank.name} by ${interaction.user.username} - Lock: ${lockResult.locked ? `${lockResult.lockDays} days` : 'none'}`);
+            console.log(`🚀 HR+ FORCE PROMOTION: ${user.username} force promoted from ${oldRank.name} to ${targetRank.name} by ${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)}) - Lock: ${lockResult.locked ? `${lockResult.lockDays} days` : 'none'}`);
 
         } catch (error) {
             console.error('❌ Force promotion error:', error);

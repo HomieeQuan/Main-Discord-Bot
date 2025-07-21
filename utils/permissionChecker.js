@@ -1,4 +1,4 @@
-// utils/permissionChecker.js - COMPLETELY REWRITTEN with proper role hierarchy
+// utils/permissionChecker.js - FIXED HR role name from "Executive Operator" to "HR | Executive Operator"
 const ROLES = {
     // COMMANDER+ LEVEL (Emergency/Critical Access)
     COMMANDER: 'A | SWAT Commander',
@@ -7,7 +7,8 @@ const ROLES = {
     // MANAGEMENT LEVEL (HR+ Access)
     DEPUTY_COMMANDER: 'A | Deputy Commander',
     OPERATIONS_CHIEF: 'A | Chief of Operations',
-    EXECUTIVE_OPERATOR: 'Executive Operator',
+    // 🔧 FIXED: Changed from 'Executive Operator' to 'HR | Executive Operator'
+    EXECUTIVE_OPERATOR: 'HR | Executive Operator',
     SENIOR_EXECUTIVE_OPERATOR: 'Senior Executive Operator',
     
     // OPERATOR LEVEL (Basic Access)
@@ -23,6 +24,7 @@ const ROLE_LEVELS = {
     // MANAGEMENT LEVEL (HR+)
     [ROLES.DEPUTY_COMMANDER]: 50,
     [ROLES.OPERATIONS_CHIEF]: 50,
+    // 🔧 FIXED: Now uses 'HR | Executive Operator' role name
     [ROLES.EXECUTIVE_OPERATOR]: 50,
     [ROLES.SENIOR_EXECUTIVE_OPERATOR]: 50,
     
@@ -114,35 +116,35 @@ class PermissionChecker {
 
     // HR+ PERMISSIONS (Management Level)
     static canManagePoints(member) {
-        return this.isHRPlus(member); // Executive Operator+ required
+        return this.isHRPlus(member); // HR | Executive Operator+ required
     }
 
     static canViewLogs(member) {
-        return this.isHRPlus(member); // Executive Operator+ required
+        return this.isHRPlus(member); // HR | Executive Operator+ required
     }
 
     static canViewScreenshots(member) {
-        return this.isHRPlus(member); // Executive Operator+ required
+        return this.isHRPlus(member); // HR | Executive Operator+ required
     }
 
     static canResetWeek(member) {
-        return this.isHRPlus(member); // Executive Operator+ required
+        return this.isHRPlus(member); // HR | Executive Operator+ required
     }
 
     static canManageUsers(member) {
-        return this.isHRPlus(member); // Executive Operator+ required (delete users, etc.)
+        return this.isHRPlus(member); // HR | Executive Operator+ required (delete users, etc.)
     }
 
     static canManagePromotions(member) {
-        return this.isHRPlus(member); // Executive Operator+ required (approve/deny promotions)
+        return this.isHRPlus(member); // HR | Executive Operator+ required (approve/deny promotions)
     }
 
     static canManageBoosterSync(member) {
-        return this.isHRPlus(member); // Executive Operator+ required
+        return this.isHRPlus(member); // HR | Executive Operator+ required
     }
 
     static canViewOtherStats(member) {
-        return this.isHRPlus(member); // Executive Operator+ required
+        return this.isHRPlus(member); // HR | Executive Operator+ required
     }
 
     // COMMANDER+ PERMISSIONS (Emergency/Critical Level)
@@ -154,8 +156,9 @@ class PermissionChecker {
         return this.isCommander(member); // A | SWAT Commander or . required
     }
 
+    // 🔧 ISSUE #5 FIX: Force promotions now allow HR+ instead of Commander+ only
     static canForcePromotions(member) {
-        return this.isCommander(member); // A | SWAT Commander or . required
+        return this.isHRPlus(member); // 🔧 CHANGED: HR+ can now use force promotions (was Commander+ only)
     }
 
     static canManageAutomation(member) {
@@ -229,17 +232,17 @@ class PermissionChecker {
             'COMMANDER+ LEVEL (Emergency/Critical Access)': {
                 roles: [ROLES.COMMANDER, ROLES.ADMIN],
                 level: 100,
-                access: 'ALL commands including emergency, backup, force promotions, automation'
+                access: 'ALL commands including emergency, backup, automation'
             },
             'MANAGEMENT LEVEL (HR+ Access)': {
                 roles: [
                     ROLES.DEPUTY_COMMANDER,
                     ROLES.OPERATIONS_CHIEF,
-                    ROLES.EXECUTIVE_OPERATOR,
+                    ROLES.EXECUTIVE_OPERATOR, // 🔧 Now displays "HR | Executive Operator"
                     ROLES.SENIOR_EXECUTIVE_OPERATOR
                 ],
                 level: 50,
-                access: 'HR functions, point management, user management, promotions, booster sync'
+                access: 'HR functions, point management, user management, promotions, booster sync, force promotions'
             },
             'OPERATOR LEVEL (Basic Access)': {
                 roles: [ROLES.SWAT_OPERATOR],

@@ -1,10 +1,10 @@
-// controllers/statsController.js - FIXED rank lock display and removed medal emoji
+// controllers/statsController.js - FIXED to hide HR audit actions from user-visible stats
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const SWATEmbeds = require('../views/embedBuilder');
 
 class StatsController {
-    // FIXED: Personal stats now shows rank lock properly
+    // FIXED: Personal stats now hides HR audit actions from recent events
     static async getPersonalStats(interaction) {
         try {
             // Find user in database
@@ -56,10 +56,27 @@ class StatsController {
                 allTimePoints: { $gt: user.allTimePoints || 0 } 
             }) + 1;
     
-            // Get recent events (last 5)
-            const recentEvents = await EventLog.find({ userId: interaction.user.id })
+            // 🔧 ISSUE #4 FIX: Filter out HR audit actions from user-visible recent events
+            const recentEvents = await EventLog.find({ 
+                userId: interaction.user.id,
+                // 🔧 EXCLUDE HR audit actions and other admin-only events from user view
+                eventType: { 
+                    $nin: [
+                        'hr_audit_action',        // 🔧 PRIMARY FIX: Hide HR audit entries
+                        'hr_point_adjustment',    // Hide HR point adjustments
+                        'hr_critical_action',     // Hide critical HR actions
+                        'user_deletion',          // Hide user deletion logs
+                        'auto_cleanup',          // Hide auto cleanup logs
+                        'booster_status_change', // Hide booster sync logs
+                        'daily_automation',      // Hide automation logs
+                        'automation_error'       // Hide automation errors
+                    ] 
+                }
+            })
                 .sort({ submittedAt: -1 })  // Most recent first
                 .limit(5);
+    
+            console.log(`📊 Personal stats: Found ${recentEvents.length} user-visible events (HR audit actions filtered out)`);
     
             // Create stats embed with rank lock support
             const statsEmbed = SWATEmbeds.createPersonalStatsEmbed(
@@ -85,7 +102,7 @@ class StatsController {
         }
     }
 
-    // FIXED: User stats for HR viewing (also shows rank lock consistently)
+    // FIXED: User stats for HR viewing (also hides HR audit actions from display)
     static async getUserStats(interaction, targetUser) {
         try {
             // Check if user has permission to view other stats (HR only for now)
@@ -134,10 +151,26 @@ class StatsController {
                 allTimePoints: { $gt: user.allTimePoints || 0 } 
             }) + 1;
     
-            // Get recent events
-            const recentEvents = await EventLog.find({ userId: targetUser.id })
+            // 🔧 ISSUE #4 FIX: For HR viewing others, show user events but still filter out HR audit actions
+            // HR can use /audit-user to see the full audit trail if needed
+            const recentEvents = await EventLog.find({ 
+                userId: targetUser.id,
+                // 🔧 Even for HR viewing others, filter HR audit actions from the general stats display
+                // HR should use dedicated audit commands to see full audit trails
+                eventType: { 
+                    $nin: [
+                        'hr_audit_action',        // 🔧 Hide HR audit entries from general stats view
+                        'user_deletion',          // Hide deletion logs from general view
+                        'auto_cleanup',          // Hide cleanup logs
+                        'daily_automation',      // Hide automation logs
+                        'automation_error'       // Hide automation errors
+                    ] 
+                }
+            })
                 .sort({ submittedAt: -1 })
                 .limit(5);
+    
+            console.log(`📊 HR stats view: Found ${recentEvents.length} user-visible events for ${user.username} (HR audit actions filtered)`);
     
             // Create stats embed with rank lock support
             const statsEmbed = SWATEmbeds.createPersonalStatsEmbed(
@@ -157,7 +190,6 @@ class StatsController {
             await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
     }
-}   
-    
+}
 
 module.exports = StatsController;
