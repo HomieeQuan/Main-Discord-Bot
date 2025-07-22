@@ -36,7 +36,36 @@ class SWATEmbeds {
                 });
             }
 
-            // Rank progression (only for non-Executive ranks)
+            // FIXED: Add rank progression bar for non-Executive ranks (MOVED TO CORRECT POSITION)
+            if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
+                // Ensure user has all required fields with safe fallbacks
+                const safeUser = {
+                    rankPoints: user.rankPoints || 0,
+                    rankLevel: user.rankLevel || 1,
+                    rankName: user.rankName || 'Probationary Operator'
+                };
+                
+                try {
+                    // Create rank progression bar
+                    const rankProgress = RankSystem.createRankProgressBar(safeUser);
+                    embed.addFields({
+                        name: '📈 Rank Progression',
+                        value: rankProgress,
+                        inline: false
+                    });
+                    
+                } catch (progressError) {
+                    console.error('❌ Rank progression error:', progressError);
+                    // Fallback: Show basic rank info without progress bar
+                    embed.addFields({
+                        name: '📈 Rank Progression',
+                        value: `Current rank points: ${user.rankPoints || 0}\nNext promotion requires meeting point requirements.`,
+                        inline: false
+                    });
+                }
+            }
+
+            // Weekly quota progress (this comes AFTER rank progression)
             if (RankSystem.isExecutiveOrHigher(user.rankLevel)) {
                 embed.addFields({
                     name: '🎯 Weekly Quota',
@@ -82,7 +111,14 @@ class SWATEmbeds {
                 }
             }
 
-            
+            // For Executive+ ranks, show special message
+            if (RankSystem.isExecutiveOrHigher(user.rankLevel)) {
+                embed.addFields({
+                    name: '👑 Executive Status',
+                    value: 'Hand-picked rank - no point requirements',
+                    inline: false
+                });
+            }
 
             // Performance stats
             embed.addFields(
