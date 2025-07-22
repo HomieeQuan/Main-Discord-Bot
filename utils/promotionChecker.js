@@ -231,20 +231,33 @@ class PromotionChecker {
     }
 
     // Get summary of all users eligible for promotion
+    // Get summary of all users eligible for promotion - FIXED VERSION
     static async getEligibilityReport() {
         try {
-            const users = await SWATUser.find({ promotionEligible: true });
+            console.log('🔍 Starting eligibility report generation...');
+            
+            // Get ALL users and check eligibility in real-time (don't rely on promotionEligible field)
+            const allUsers = await SWATUser.find({
+                rankLevel: { $lt: 15 } // Don't include max rank (Commander level 15)
+            });
+            
+            console.log(`📊 Checking ${allUsers.length} users for eligibility...`);
             
             const report = {
-                totalEligible: users.length,
+                totalEligible: 0,
                 byRank: {},
                 eligibleUsers: []
             };
             
-            for (const user of users) {
+            for (const user of allUsers) {
+                // Check eligibility in real-time using the same logic as review command
                 const eligibility = RankSystem.checkPromotionEligibility(user);
                 
+                console.log(`🔍 ${user.username}: eligible=${eligibility.eligible}, reason="${eligibility.reason}"`);
+                
                 if (eligibility.eligible && eligibility.nextRank) {
+                    report.totalEligible++;
+                    
                     // Group by target rank
                     const targetRank = eligibility.nextRank.name;
                     if (!report.byRank[targetRank]) {
@@ -257,10 +270,12 @@ class PromotionChecker {
                         discordId: user.discordId,
                         currentRank: eligibility.currentRank.name,
                         nextRank: eligibility.nextRank.name,
-                        rankPoints: user.rankPoints,
-                        allTimePoints: user.allTimePoints,
-                        readySince: user.lastPromotionCheck
+                        rankPoints: user.rankPoints || 0,
+                        allTimePoints: user.allTimePoints || 0,
+                        readySince: user.lastPromotionCheck || user.updatedAt
                     });
+                    
+                    console.log(`✅ ${user.username} is ELIGIBLE for promotion to ${targetRank}`);
                 }
             }
             
@@ -275,11 +290,24 @@ class PromotionChecker {
                 return b.allTimePoints - a.allTimePoints;
             });
             
+            console.log(`✅ Eligibility report complete: ${report.totalEligible} users eligible`);
+            if (report.eligibleUsers.length > 0) {
+                console.log('🎯 Eligible users:');
+                report.eligibleUsers.forEach(user => {
+                    console.log(`   - ${user.username}: ${user.currentRank} → ${user.nextRank} (${user.rankPoints} pts)`);
+                });
+            }
+            
             return report;
             
         } catch (error) {
             console.error('❌ Eligibility report error:', error);
-            return null;
+            return {
+                totalEligible: 0,
+                byRank: {},
+                eligibleUsers: [],
+                error: error.message
+            };
         }
     }
 

@@ -176,7 +176,7 @@ class RankSystem {
         };
     }
 
-    // 🔧 UPDATED: Check promotion eligibility with proper rank lock validation
+    // 🔧 FIXED: Check promotion eligibility with corrected rank lock logic
     static checkPromotionEligibility(user) {
         const currentRank = this.getRankByLevel(user.rankLevel || 1);
         const nextRank = this.getNextRank(user.rankLevel || 1);
@@ -203,12 +203,11 @@ class RankSystem {
             met: hasEnoughPoints
         };
     
-        // FIXED: Enhanced rank lock check with timezone handling
-        const lockStatus = this.checkRankLockExpiry(user);
-        const isRankLocked = !lockStatus.expired;
+        // 🔧 CRITICAL FIX: Check if user is actually rank locked
+        const isRankLocked = this.isUserRankLocked(user);
         
-        if (isRankLocked && user.rankLockUntil) {
-            // FIXED: Provide more detailed lock information
+        if (isRankLocked) {
+            const lockStatus = this.checkRankLockExpiry(user);
             const lockExpiry = new Date(user.rankLockUntil);
             const estTime = lockExpiry.toLocaleString('en-US', { 
                 timeZone: 'America/New_York',
@@ -229,6 +228,7 @@ class RankSystem {
                 daysRemaining: lockStatus.daysRemaining,
                 hoursRemaining: lockStatus.hoursRemaining,
                 lockExpiryFormatted: estTime,
+                discordTimestamp: lockStatus.discordTimestamp,
                 currentRank,
                 nextRank,
                 requirements
@@ -247,7 +247,7 @@ class RankSystem {
             };
         }
         
-        console.log(`📊 Eligibility check for ${user.username}: ${rankPoints}/${pointsRequired} rank points, locked: ${isRankLocked}, eligible: ${hasEnoughPoints}`);
+        console.log(`📊 Eligibility check for ${user.username}: ${rankPoints}/${pointsRequired} rank points, locked: false, eligible: ${hasEnoughPoints}`);
         
         return {
             eligible: hasEnoughPoints,
@@ -256,6 +256,21 @@ class RankSystem {
             nextRank,
             requirements
         };
+    }
+
+    // 🔧 NEW: Simple check if user is currently rank locked
+    static isUserRankLocked(user) {
+        // No rank lock set = not locked
+        if (!user.rankLockUntil) {
+            return false;
+        }
+        
+        // Check if lock has expired
+        const nowUTC = new Date();
+        const lockExpiryUTC = new Date(user.rankLockUntil);
+        
+        // If lock expiry is in the future, user is locked
+        return lockExpiryUTC > nowUTC;
     }
 
     // Format rank display with emoji
@@ -359,11 +374,14 @@ class RankSystem {
         return { locked: false };
     }
 
-    // 🔧 IMPROVED: Check if user's rank lock has expired with better logging
+    // 🔧 FIXED: Check if user's rank lock has expired (for automation/notifications)
     static checkRankLockExpiry(user) {
         if (!user.rankLockUntil) {
             console.log(`🔓 User ${user.username} has no rank lock set`);
-            return { expired: false };
+            return { 
+                expired: true,  // 🔧 FIXED: No lock = considered expired (available)
+                needsNotification: false  // No notification needed
+            };
         }
         
         // FIXED: Use UTC for consistent timezone handling
@@ -383,15 +401,15 @@ class RankSystem {
             };
         }
         
-        // FIXED: More accurate time calculation + Discord timestamp
+        // Lock is still active
         const timeDiffMs = lockExpiryUTC.getTime() - nowUTC.getTime();
         const hoursRemaining = Math.ceil(timeDiffMs / (1000 * 60 * 60));
         const daysRemaining = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24));
         
-        // ADDED: Discord timestamp for user display
+        // Discord timestamp for user display
         const discordTimestamp = Math.floor(lockExpiryUTC.getTime() / 1000);
         
-        // ADDED: Formatted EST time for notifications/logs
+        // Formatted EST time for notifications/logs
         const estTime = lockExpiryUTC.toLocaleString('en-US', { 
             timeZone: 'America/New_York',
             weekday: 'short',
@@ -409,8 +427,8 @@ class RankSystem {
             daysRemaining,
             hoursRemaining,
             exactExpiryTime: lockExpiryUTC,
-            discordTimestamp, // NEW: For Discord timestamp display
-            estTimeFormatted: estTime // NEW: For notifications
+            discordTimestamp,
+            estTimeFormatted: estTime
         };
     }
 }
