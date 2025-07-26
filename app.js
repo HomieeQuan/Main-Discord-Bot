@@ -78,20 +78,7 @@ async function startBot() {
                 }
             }
         });
-
-        // Keep test commands for now
-        client.on('messageCreate', message => {
-            if (message.author.bot) return;
-            
-            if (message.content.toLowerCase() === 'ping') {
-                message.reply('🏓 Pong! Bot is working!');
-            }
-            
-            if (message.content.toLowerCase() === 'roles') {
-                const roles = message.member.roles.cache.map(role => role.name).join(', ');
-                message.reply(`Your roles: ${roles}`);
-            }
-        });
+        
 
         // Error handling
         client.on('error', error => {
