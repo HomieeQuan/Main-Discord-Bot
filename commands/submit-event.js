@@ -1,4 +1,4 @@
-// commands/submit-event.js - FIXED null screenshot handling
+// commands/submit-event.js - UPDATED with new Warrant Execution event choices
 const { SlashCommandBuilder } = require('discord.js');
 const EventController = require('../controllers/eventController');
 
@@ -23,7 +23,10 @@ module.exports = {
                     { name: 'SLRPD Inspection Ceremony (2pts)', value: 'slrpd_inspection' },
                     { name: 'Combat Training (2pts)', value: 'combat_training' },
                     { name: 'SWAT Inspection Ceremony (3pts)', value: 'swat_inspection' },
-                    { name: 'Deployment (4pts)', value: 'gang_deployment' }
+                    { name: 'Deployment (4pts)', value: 'gang_deployment' },
+                    // NEW: Warrant Execution events
+                    { name: 'Warrant Execution [Arrest] (10pts)', value: 'warrant_execution_arrest' },
+                    { name: 'Warrant Execution [Kill] (6pts)', value: 'warrant_execution_kill' }
                 ))
         .addStringOption(option =>
             option.setName('description')
@@ -85,6 +88,24 @@ module.exports = {
         if (isTryoutEvent && attendeesPassed === 0) {
             return await interaction.reply({
                 content: '❌ **Tryout events require attendees passed count.**\n\nHow many people passed the tryout? Use the `attendees-passed` option to get bonus points!\n\n🎯 **Example**: If 5 people passed your tryout, you get +5 bonus points!',
+                ephemeral: true
+            });
+        }
+
+        // NEW: Validate Warrant Execution events (no attendees bonus, special quantity limits)
+        const isWarrantExecution = eventType === 'warrant_execution_arrest' || eventType === 'warrant_execution_kill';
+        
+        if (isWarrantExecution && attendeesPassed > 0) {
+            return await interaction.reply({
+                content: '❌ **Warrant Execution events** do not support attendees passed.\n\n💡 **Tip**: These events are for individual high-value target arrests/kills.',
+                ephemeral: true
+            });
+        }
+
+        // Optional: Add quantity limits for warrant executions if desired
+        if (isWarrantExecution && quantity > 5) {
+            return await interaction.reply({
+                content: '❌ **Warrant Execution events** are limited to maximum 5 per submission.\n\n💡 **Tip**: These are high-value targets, so large quantities should be rare.',
                 ephemeral: true
             });
         }

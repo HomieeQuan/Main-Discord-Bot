@@ -1,28 +1,28 @@
-// utils/quotaSystem.js - NEW rank-based quota management system
+// utils/quotaSystem.js - UPDATED with new reduced quota requirements
 const RankSystem = require('./rankSystem');
 
 class QuotaSystem {
-    // Rank-based quota structure as specified in requirements
+    // UPDATED: New rank-based quota structure with reduced requirements
     static quotaByRankLevel = {
-        // Probationary
+        // Probationary (unchanged)
         1: 10,   // Probationary Operator: 10 points
         
-        // Junior-Senior ranks
-        2: 20,   // Junior Operator: 20 points
-        3: 20,   // Experienced Operator: 20 points
-        4: 20,   // Senior Operator: 20 points
+        // Junior-Senior ranks (reduced from 20 to 12)
+        2: 12,   // Junior Operator: 12 points (was 20)
+        3: 12,   // Experienced Operator: 12 points (was 20)
+        4: 12,   // Senior Operator: 12 points (was 20)
         
-        // Specialized-Elite ranks
-        5: 25,   // Specialized Operator: 25 points
-        6: 25,   // Elite Operator: 25 points
+        // Specialized-Elite ranks (reduced from 25 to 15)
+        5: 15,   // Specialized Operator: 15 points (was 25)
+        6: 15,   // Elite Operator: 15 points (was 25)
         
-        // Elite I-IV ranks
-        7: 30,   // Elite Operator I Class: 30 points
-        8: 30,   // Elite Operator II Class: 30 points
-        9: 30,   // Elite Operator III Class: 30 points
-        10: 30,  // Elite Operator IV Class: 30 points
+        // Elite I-IV ranks (reduced from 30 to 18)
+        7: 18,   // Elite Operator I Class: 18 points (was 30)
+        8: 18,   // Elite Operator II Class: 18 points (was 30)
+        9: 18,   // Elite Operator III Class: 18 points (was 30)
+        10: 18,  // Elite Operator IV Class: 18 points (was 30)
         
-        // Executive+ ranks (no quota)
+        // Executive+ ranks (no quota - unchanged)
         11: 0,   // Executive Operator: No quota
         12: 0,   // Senior Executive Operator: No quota
         13: 0,   // Operations Chief: No quota
@@ -72,7 +72,7 @@ class QuotaSystem {
         try {
             const SWATUser = require('../models/SWATUser');
             
-            console.log('🔧 Starting bulk quota update...');
+            console.log('🔧 Starting bulk quota update with NEW quota requirements...');
             
             const users = await SWATUser.find({});
             let updatedCount = 0;
@@ -103,13 +103,13 @@ class QuotaSystem {
                 await user.save();
             }
             
-            console.log(`✅ Bulk quota update complete:`);
+            console.log(`✅ Bulk quota update complete with NEW requirements:`);
             console.log(`   - Total users: ${users.length}`);
             console.log(`   - Quotas updated: ${updatedCount}`);
             console.log(`   - Completion status changes: ${completionChanges}`);
             
             if (updateResults.length > 0) {
-                console.log('📊 Quota changes:');
+                console.log('📊 NEW Quota changes:');
                 updateResults.forEach(result => {
                     console.log(`   - ${result.username}: ${result.oldQuota} → ${result.newQuota} points`);
                 });
@@ -220,14 +220,14 @@ class QuotaSystem {
         try {
             const SWATUser = require('../models/SWATUser');
             
-            console.log('🔄 Applying weekly quota reset with rank-based quotas...');
+            console.log('🔄 Applying weekly quota reset with UPDATED rank-based quotas...');
             
             // Update all users with current rank-based quotas
             const users = await SWATUser.find({});
             let updatedCount = 0;
             
             for (const user of users) {
-                const newQuota = this.getUserQuota(user);
+                const newQuota = this.getUserQuota(user); // Uses NEW quota requirements
                 
                 // Update quota and reset weekly stats
                 user.weeklyQuota = newQuota;
@@ -242,7 +242,8 @@ class QuotaSystem {
                 updatedCount++;
             }
             
-            console.log(`✅ Weekly quota reset complete: ${updatedCount} users updated with rank-based quotas`);
+            console.log(`✅ Weekly quota reset complete: ${updatedCount} users updated with NEW rank-based quotas`);
+            console.log(`📊 NEW Quota structure: Probationary=10, Junior-Senior=12, Specialized-Elite=15, Elite I-IV=18, Executive+=0`);
             
             return {
                 success: true,
