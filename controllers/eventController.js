@@ -6,6 +6,7 @@ const PermissionChecker = require('../utils/permissionChecker');
 const SWATEmbeds = require('../views/embedBuilder');
 const RankSystem = require('../utils/rankSystem');
 const QuotaSystem = require('../utils/quotaSystem');
+const CloudinaryStorage = require('../utils/cloudinaryStorage');
 const { EmbedBuilder } = require('discord.js');
 
 class EventController {
@@ -107,7 +108,7 @@ class EventController {
             
             try {
                 session.startTransaction();
-                console.log(`🔄 TRANSACTION: Started for ${interaction.user.username}`);
+                console.log(`📄 TRANSACTION: Started for ${interaction.user.username}`);
 
                 // Step 4: Get or create user with PROPER rank points initialization
                 let user = await SWATUser.findOne({ discordId: interaction.user.id }).session(session);
@@ -227,7 +228,15 @@ class EventController {
                 await user.save({ session });
                 console.log(`✅ User saved with rank points: ${user.rankPoints} (in transaction)`);
 
-                // Step 8: Create event log with multiple screenshots
+                // Step 8: Upload screenshots to Cloudinary for permanent storage
+                const cloudStorage = new CloudinaryStorage();
+                const permanentScreenshotUrls = await cloudStorage.uploadMultipleScreenshots(
+                    screenshots, 
+                    interaction.user.id, 
+                    eventType
+                );
+
+                // Step 9: Create event log with permanent screenshot URLs
                 const enhancedDescription = isTryoutEvent && attendeesPassed > 0 
                     ? `${description} (${attendeesPassed} attendees passed)`
                     : description;
@@ -236,10 +245,7 @@ class EventController {
                     ? `${enhancedDescription} (x${quantity})` 
                     : enhancedDescription;
 
-                // Extract screenshot URLs safely
-                const screenshotUrls = screenshots.map(screenshot => screenshot.url);
-                
-                console.log(`💾 Saving event with ${screenshotUrls.length} screenshot URLs:`, screenshotUrls);
+                console.log(`💾 Saving event with ${permanentScreenshotUrls.length} permanent screenshot URLs`);
 
                 const eventLog = new EventLog({
                     userId: interaction.user.id,
@@ -248,8 +254,8 @@ class EventController {
                     description: finalDescription,
                     pointsAwarded: totalPoints,
                     boostedPoints: isBooster,
-                    screenshotUrls: screenshotUrls,
-                    screenshotUrl: screenshotUrls[0], // Backward compatibility
+                    screenshotUrls: permanentScreenshotUrls, // NOW PERMANENT CLOUDINARY URLS!
+                    screenshotUrl: permanentScreenshotUrls[0], // Backward compatibility
                     quantity: quantity
                 });
 
@@ -259,13 +265,13 @@ class EventController {
 
                 // FIXED: Save event log within transaction
                 await eventLog.save({ session });
-                console.log(`✅ Event saved successfully with ${screenshotUrls.length} screenshots (in transaction)`);
+                console.log(`✅ Event saved successfully with ${permanentScreenshotUrls.length} permanent screenshots (in transaction)`);
 
                 // FIXED: Commit transaction before sending responses
                 await session.commitTransaction();
-                console.log(`🔄 TRANSACTION: Committed for ${user.username}`);
+                console.log(`📄 TRANSACTION: Committed for ${user.username}`);
 
-                // Step 9: Create response embed using the freshly saved user data
+                // Step 10: Create response embed using the freshly saved user data
                 const embed = this.createEnhancedSubmissionEmbed(
                     user, eventType, description, totalPoints, basePointsPerEvent, 
                     isBooster, screenshots, quantity, attendeesPassed, attendeesBonus
@@ -273,7 +279,7 @@ class EventController {
 
                 await interaction.editReply({ embeds: [embed] });
 
-                // Step 10: Handle promotion notifications (outside transaction)
+                // Step 11: Handle promotion notifications (outside transaction)
                 const pointsNewlyMet = !pointsWereMetBefore && pointsAreMetAfter;
 
                 if (pointsNewlyMet && pointsAfter.nextRank) {
@@ -387,7 +393,7 @@ class EventController {
                 console.log(`📊 Event submitted by ${user.username}:`);
                 console.log(`   - Event: ${eventType} x${quantity}`);
                 console.log(`   - Points awarded: ${totalPoints}`);
-                console.log(`   - Screenshots: ${screenshots.length} attached`);
+                console.log(`   - Screenshots: ${screenshots.length} attached (${permanentScreenshotUrls.length} permanently stored)`);
                 console.log(`   - Weekly points: ${oldWeeklyPoints} → ${user.weeklyPoints}`);
                 console.log(`   - All-time points: ${oldAllTimePoints} → ${user.allTimePoints}`);
                 console.log(`   - Rank points: ${oldRankPoints} → ${user.rankPoints}`);
@@ -401,7 +407,7 @@ class EventController {
             } catch (transactionError) {
                 // FIXED: Rollback transaction on error
                 await session.abortTransaction();
-                console.error(`🔄 TRANSACTION ABORTED for ${interaction.user.username}:`, transactionError);
+                console.error(`📄 TRANSACTION ABORTED for ${interaction.user.username}:`, transactionError);
                 throw transactionError;
             } finally {
                 await session.endSession();
@@ -502,7 +508,7 @@ class EventController {
             // Add screenshot count info
             {
                 name: '📸 Screenshots',
-                value: `${screenshots.length} image${screenshots.length > 1 ? 's' : ''} attached`,
+                value: `${screenshots.length} image${screenshots.length > 1 ? 's' : ''} permanently stored`,
                 inline: true
             }
         );
@@ -581,7 +587,7 @@ class EventController {
         }
 
         embed.setFooter({ 
-            text: `Total Events: ${user.totalEvents || 0} | Rank Points: ${user.rankPoints || 0} | All-Time: ${user.allTimePoints || 0}` 
+            text: `Total Events: ${user.totalEvents || 0} | Rank Points: ${user.rankPoints || 0} | All-Time: ${user.allTimePoints || 0} | Screenshots permanently stored` 
         });
 
         return embed;
