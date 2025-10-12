@@ -71,6 +71,23 @@ const swatUserSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+
+    active: {
+        type: Boolean,
+        default: true
+    },
+    deletedAt: {
+        type: Date,
+        default: null
+    },
+    deletedBy: {
+        type: String,
+        default: null
+    },
+    deletionReason: {
+        type: String,
+        default: null
+    },
     
     // NEW: RANK PROGRESSION SYSTEM
     rankName: {

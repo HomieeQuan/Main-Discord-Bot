@@ -1,4 +1,4 @@
-// controllers/hrController.js - COMPLETE FILE with fixed promotion notifications
+// controllers/hrController.js - COMPLETE FILE with fixed weekly reset
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const SWATEmbeds = require('../views/embedBuilder');
@@ -8,7 +8,7 @@ const RankSystem = require('../utils/rankSystem');
 const { EmbedBuilder } = require('discord.js');
 
 class HRController {
-    // 🔧 FIXED: Manage user points with proper promotion notifications
+    // Manage user points with proper promotion notifications
     static async managePoints(interaction, targetUser, action, amount, reason) {
         try {
             // Check HR permission
@@ -25,16 +25,16 @@ class HRController {
                 user = new SWATUser({
                     discordId: targetUser.id,
                     username: targetMember.displayName || targetUser.username,
-                    rankPoints: 0 // 🔧 FIXED: Initialize rank points for new users
+                    rankPoints: 0
                 });
             }
 
-            // 🔧 FIXED: Store old values for logging with safe fallbacks
+            // Store old values for logging with safe fallbacks
             const oldWeeklyPoints = user.weeklyPoints || 0;
             const oldAllTimePoints = user.allTimePoints || 0;
-            const oldRankPoints = user.rankPoints || 0; // SAFE FALLBACK
+            const oldRankPoints = user.rankPoints || 0;
             
-            // 🔧 FIXED: Check promotion requirements BEFORE point changes
+            // Check promotion requirements BEFORE point changes
             const pointsBefore = RankSystem.checkPointRequirements(user);
             const pointsWereMetBefore = pointsBefore.pointsMet;
 
@@ -68,12 +68,12 @@ class HRController {
                     return await interaction.reply({ embeds: [warningEmbed], ephemeral: true });
                 }
 
-                // Execute the nuclear option - FIXED: Also reset rank points
+                // Execute the nuclear option
                 user.weeklyPoints = 0;
                 user.allTimePoints = 0;
-                user.rankPoints = 0; // 🔧 FIXED: Also reset rank points
+                user.rankPoints = 0;
                 user.quotaCompleted = false;
-                user.promotionEligible = false; // 🔧 FIXED: Reset promotion eligibility
+                user.promotionEligible = false;
 
                 await user.save();
 
@@ -96,7 +96,7 @@ class HRController {
                         newWeeklyPoints: 0,
                         oldAllTimePoints: oldAllTimePoints,
                         newAllTimePoints: 0,
-                        oldRankPoints: oldRankPoints, // 🔧 FIXED: Track rank points
+                        oldRankPoints: oldRankPoints,
                         newRankPoints: 0
                     }
                 });
@@ -142,7 +142,7 @@ class HRController {
                     return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            // 🔧 FIXED: Update rank points properly for HR adjustments
+            // Update rank points properly for HR adjustments
             if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
                 // For non-Executive ranks, adjust rank points by the same amount as the adjustment
                 if (action === 'add') {
@@ -164,7 +164,7 @@ class HRController {
             user.weeklyQuota = currentQuota;
             user.quotaCompleted = QuotaSystem.isQuotaCompleted(user);
 
-            // 🔧 FIXED: Check promotion status AFTER point changes
+            // Check promotion status AFTER point changes
             const pointsAfter = RankSystem.checkPointRequirements(user);
             const pointsAreMetAfter = pointsAfter.pointsMet;
             const eligibilityAfter = RankSystem.checkPromotionEligibility(user);
@@ -193,7 +193,7 @@ class HRController {
                     newWeeklyPoints: user.weeklyPoints,
                     oldAllTimePoints: oldAllTimePoints,
                     newAllTimePoints: user.allTimePoints,
-                    oldRankPoints: oldRankPoints, // 🔧 FIXED: Track rank points
+                    oldRankPoints: oldRankPoints,
                     newRankPoints: user.rankPoints,
                     promotionEligibilityChanged: pointsWereMetBefore !== pointsAreMetAfter
                 }
@@ -220,7 +220,7 @@ class HRController {
                 .setFooter({ text: `Action performed by ${interaction.user.username}` })
                 .setTimestamp();
 
-            // 🔧 FIXED: Send promotion notification if user newly meets point requirements
+            // Send promotion notification if user newly meets point requirements
             const pointsNewlyMet = !pointsWereMetBefore && pointsAreMetAfter;
 
             if (pointsNewlyMet && pointsAfter.nextRank) {
@@ -317,7 +317,7 @@ class HRController {
         }
     }
 
-    // UPDATED: Reset weekly statistics with new rank-based quota system
+    // UPDATED: Reset weekly statistics with enhanced completion tracking - FIXED field length limits
     static async resetWeek(interaction, confirmReset) {
         try {
             // Check HR permission
@@ -338,7 +338,7 @@ class HRController {
                             inline: false 
                         },
                         { 
-                            name: '🎯 NEW: Update Quotas', 
+                            name: '🎯 Update Quotas', 
                             value: '• Recalculate quotas based on current ranks\n• Apply rank-based quota system\n• Update completion status', 
                             inline: false 
                         },
@@ -358,7 +358,7 @@ class HRController {
                             inline: false 
                         }
                     )
-                    .setFooter({ text: 'NEW: Now includes rank-based quota updates! Rank points preserved!' });
+                    .setFooter({ text: 'Rank points preserved! Quota system will update based on ranks!' });
 
                 return await interaction.reply({ embeds: [warningEmbed], ephemeral: true });
             }
@@ -370,28 +370,151 @@ class HRController {
             const totalUsers = users.length;
             const completedQuota = users.filter(u => u.quotaCompleted).length;
             const topPerformer = users[0];
-            const totalWeeklyPoints = users.reduce((sum, u) => sum + u.weeklyPoints, 0);
+            const totalWeeklyPoints = users.reduce((sum, u) => sum + (u.weeklyPoints || 0), 0);
+
+            // Separate completed and incomplete users
+            const completed = users.filter(u => u.quotaCompleted);
+            const incomplete = users.filter(u => !u.quotaCompleted && u.weeklyPoints > 0);
 
             // Get quota statistics before reset
             const quotaStats = QuotaSystem.getQuotaStatistics();
             const usersNeedingQuotaUpdate = await QuotaSystem.getUsersNeedingQuotaUpdate();
 
-            // Create weekly summary
-            const summaryEmbed = new EmbedBuilder()
-                .setColor('#0099ff')
-                .setTitle('📊 Weekly Summary (Before Reset)')
-                .addFields(
-                    { name: '👥 Total Operators', value: totalUsers.toString(), inline: true },
-                    { name: '✅ Quota Completed', value: `${completedQuota}/${totalUsers} (${Math.floor((completedQuota/totalUsers)*100)}%)`, inline: true },
-                    { name: '📊 Total Points Earned', value: totalWeeklyPoints.toString(), inline: true },
-                    { name: '🏆 Top Performer', value: topPerformer ? `${topPerformer.username} (${topPerformer.weeklyPoints} pts)` : 'None', inline: true },
-                    { name: '📈 Average Points', value: totalUsers > 0 ? (totalWeeklyPoints / totalUsers).toFixed(1) : '0', inline: true },
-                    { name: '🔧 Quota Updates Needed', value: `${usersNeedingQuotaUpdate.length} users`, inline: true },
-                    { name: '🎯 Best Performers', value: users.slice(0, 3).map((u, i) => `${i + 1}. ${u.username} (${u.weeklyPoints} pts)`).join('\n') || 'None', inline: false }
-                )
+            // FIXED: Create weekly champions embed with character limit handling
+            const championsEmbed = new EmbedBuilder()
+                .setColor('#00ff00')
+                .setTitle('🏆 Weekly Champions')
+                .setDescription(`${completed.length} operator${completed.length !== 1 ? 's' : ''} completed their weekly quota!`)
                 .setTimestamp();
 
-            // UPDATED: Use new quota system for weekly reset
+            if (completed.length > 0) {
+                // Sort by points (highest first)
+                const sortedCompleted = completed.sort((a, b) => b.weeklyPoints - a.weeklyPoints);
+                
+                // FIXED: Build list with character count tracking
+                const championsList = [];
+                let currentLength = 0;
+                const maxLength = 1000; // Safe limit under 1024
+                
+                for (let i = 0; i < sortedCompleted.length && i < 12; i++) {
+                    const user = sortedCompleted[i];
+                    const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
+                        `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
+                    const position = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                    const bonus = user.weeklyPoints > user.weeklyQuota ? 
+                        ` (+${user.weeklyPoints - user.weeklyQuota})` : '';
+                    
+                    const line = `${position} ${rankEmoji}**${user.username}** - ${user.weeklyPoints} pts${bonus}`;
+                    
+                    // Check if adding this line would exceed limit
+                    if (currentLength + line.length + 2 > maxLength) {
+                        championsList.push(`... and ${sortedCompleted.length - i} more`);
+                        break;
+                    }
+                    
+                    championsList.push(line);
+                    currentLength += line.length + 2; // +2 for newlines
+                }
+                
+                // If we didn't hit the limit but there are more users
+                if (sortedCompleted.length > 12 && championsList[championsList.length - 1].indexOf('... and') === -1) {
+                    championsList.push(`... and ${sortedCompleted.length - 12} more`);
+                }
+
+                championsEmbed.addFields({
+                    name: `✅ Completed Quota (${completed.length})`,
+                    value: championsList.join('\n\n'),
+                    inline: false
+                });
+
+                // Add top 3 special recognition
+                if (sortedCompleted.length >= 3) {
+                    championsEmbed.addFields({
+                        name: '🏅 Top 3 Performers',
+                        value: [
+                            `🥇 **${sortedCompleted[0].username}** - ${sortedCompleted[0].weeklyPoints} pts`,
+                            `🥈 **${sortedCompleted[1].username}** - ${sortedCompleted[1].weeklyPoints} pts`,
+                            `🥉 **${sortedCompleted[2].username}** - ${sortedCompleted[2].weeklyPoints} pts`
+                        ].join('\n'),
+                        inline: false
+                    });
+                }
+            } else {
+                championsEmbed.addFields({
+                    name: '⚠️ No Completions',
+                    value: 'No operators completed their quota this week.',
+                    inline: false
+                });
+            }
+
+            // FIXED: Create incomplete users embed with character limit handling
+            const incompleteEmbed = new EmbedBuilder()
+                .setColor('#ff6600')
+                .setTitle('⏳ Incomplete This Week')
+                .setDescription(`${incomplete.length} operator${incomplete.length !== 1 ? 's' : ''} did not complete their weekly quota`)
+                .setTimestamp();
+
+            if (incomplete.length > 0) {
+                // Sort by percentage completion (lowest first for HR attention)
+                const sortedIncomplete = incomplete.sort((a, b) => {
+                    const aPercent = (a.weeklyPoints / a.weeklyQuota) * 100;
+                    const bPercent = (b.weeklyPoints / b.weeklyQuota) * 100;
+                    return aPercent - bPercent;
+                });
+
+                // FIXED: Build list with character count tracking
+                const incompleteList = [];
+                let currentLength = 0;
+                const maxLength = 1000; // Safe limit under 1024
+
+                for (let i = 0; i < sortedIncomplete.length && i < 12; i++) {
+                    const user = sortedIncomplete[i];
+                    const percentage = Math.round((user.weeklyPoints / user.weeklyQuota) * 100);
+                    const status = percentage >= 75 ? '⚠️' : percentage >= 50 ? '⏳' : '❌';
+                    const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
+                        `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
+                    
+                    const line = `${status} ${rankEmoji}**${user.username}** - ${user.weeklyPoints}/${user.weeklyQuota} pts (${percentage}%)`;
+                    
+                    // Check if adding this line would exceed limit
+                    if (currentLength + line.length + 2 > maxLength) {
+                        incompleteList.push(`... and ${sortedIncomplete.length - i} more`);
+                        break;
+                    }
+                    
+                    incompleteList.push(line);
+                    currentLength += line.length + 2; // +2 for newlines
+                }
+
+                // If we didn't hit the limit but there are more users
+                if (sortedIncomplete.length > 12 && incompleteList[incompleteList.length - 1].indexOf('... and') === -1) {
+                    incompleteList.push(`... and ${sortedIncomplete.length - 12} more`);
+                }
+
+                incompleteEmbed.addFields({
+                    name: `⏳ Did Not Complete (${incomplete.length})`,
+                    value: incompleteList.join('\n\n'),
+                    inline: false
+                });
+
+                // Add at-risk users (below 50%)
+                const atRisk = sortedIncomplete.filter(u => (u.weeklyPoints / u.weeklyQuota) < 0.5);
+                if (atRisk.length > 0) {
+                    incompleteEmbed.addFields({
+                        name: '⚠️ HR Follow-Up Recommended',
+                        value: `${atRisk.length} operator${atRisk.length !== 1 ? 's' : ''} below 50% completion - consider check-in`,
+                        inline: false
+                    });
+                }
+            } else if (completed.length === 0) {
+                incompleteEmbed.addFields({
+                    name: '📊 No Activity',
+                    value: 'No operators submitted events this week.',
+                    inline: false
+                });
+            }
+
+            // Apply quota reset
             console.log('🔄 Applying weekly reset with rank-based quota system...');
             const quotaResetResult = await QuotaSystem.applyWeeklyQuotaReset();
 
@@ -405,59 +528,43 @@ class HRController {
                 return await interaction.editReply({ embeds: [errorEmbed] });
             }
 
-            // Create reset confirmation embed with quota information
+            // Create reset confirmation embed
             const resetEmbed = new EmbedBuilder()
-                .setColor('#00ff00')
+                .setColor('#0099ff')
                 .setTitle('🔄 Weekly Reset Completed!')
                 .setDescription('✅ **Successfully started new quota week with rank-based quotas**')
                 .addFields(
                     { name: '📅 Reset Date', value: new Date().toLocaleString(), inline: true },
                     { name: '👥 Users Reset', value: quotaResetResult.usersUpdated.toString(), inline: true },
-                    { name: '🎯 Quota System', value: 'Rank-based quotas applied', inline: true },
+                    { name: '✅ Quota Completed', value: `${completed.length}/${totalUsers} (${Math.round((completed.length/totalUsers)*100)}%)`, inline: true },
+                    { name: '📊 Total Points Earned', value: totalWeeklyPoints.toString(), inline: true },
+                    { name: '🏆 Top Performer', value: topPerformer ? `${topPerformer.username} (${topPerformer.weeklyPoints} pts)` : 'None', inline: true },
+                    { name: '📈 Average Points', value: totalUsers > 0 ? (totalWeeklyPoints / totalUsers).toFixed(1) : '0', inline: true },
                     { 
                         name: '📋 What Was Reset', 
-                        value: '• Weekly points: 0\n• Weekly events: 0\n• Quota status: In Progress\n• Daily points: 0\n• **NEW**: Quotas updated by rank\n• **PRESERVED**: Rank points & progression', 
+                        value: '• Weekly points: 0\n• Weekly events: 0\n• Quota status: In Progress\n• Daily points: 0\n• Quotas updated by rank\n• **PRESERVED**: Rank points & progression', 
                         inline: false 
                     },
                     {
-                        name: '🎯 Quota Breakdown',
-                        value: [
-                            'Probationary (1): 10 pts',
-                            'Junior-Senior (2-4): 20 pts', 
-                            'Specialized-Elite (5-6): 25 pts',
-                            'Elite I-IV (7-10): 30 pts',
-                            'Executive+ (11-15): No quota'
-                        ].join('\n'),
+                        name: '🎯 Quota Structure',
+                        value: 'Probationary: 10 pts\nJunior-Senior: 12 pts\nSpecialized-Elite: 15 pts\nElite I-IV: 18 pts\nExecutive+: No quota',
                         inline: false
                     }
                 )
                 .setFooter({ text: `Reset performed by ${interaction.user.username}` })
                 .setTimestamp();
 
-            // Add quota change summary if any users had quota updates
-            if (usersNeedingQuotaUpdate.length > 0) {
-                const quotaChangeText = usersNeedingQuotaUpdate
-                    .slice(0, 5)
-                    .map(user => `• ${user.username}: ${user.currentQuota} → ${user.expectedQuota} pts`)
-                    .join('\n');
-                
-                resetEmbed.addFields({
-                    name: '🔧 Quota Updates Applied',
-                    value: quotaChangeText + (usersNeedingQuotaUpdate.length > 5 ? `\n... and ${usersNeedingQuotaUpdate.length - 5} more` : ''),
-                    inline: false
-                });
-            }
-
+            // Send all embeds
             await interaction.editReply({ 
-                content: '✅ **Weekly reset completed successfully with rank-based quotas!**',
-                embeds: [summaryEmbed, resetEmbed] 
+                content: '✅ **Weekly reset completed successfully!**',
+                embeds: [championsEmbed, incompleteEmbed, resetEmbed] 
             });
 
             // Enhanced logging
             console.log(`🔄 WEEKLY RESET: Performed by ${interaction.user.username}`);
             console.log(`   - Users reset: ${quotaResetResult.usersUpdated}`);
-            console.log(`   - Quota updates applied: ${usersNeedingQuotaUpdate.length}`);
-            console.log(`   - Quota system: Rank-based quotas now active`);
+            console.log(`   - Completed quota: ${completed.length}/${totalUsers}`);
+            console.log(`   - Incomplete: ${incomplete.length}`);
             console.log(`   - Rank points: PRESERVED (not reset)`);
 
         } catch (error) {
@@ -546,9 +653,9 @@ class HRController {
             for (const [username, userLogs] of Object.entries(logsByUser)) {
                 if (fieldCount >= 8) break; // Discord embed field limit
 
+                const PointCalculator = require('../utils/pointCalculator');
                 const logText = userLogs.slice(0, 3).map(log => {
                     const date = log.submittedAt.toLocaleDateString();
-                    const PointCalculator = require('../utils/pointCalculator');
                     const eventName = PointCalculator.getEventName(log.eventType);
                     
                     // Add screenshot indicator
@@ -722,8 +829,8 @@ class HRController {
 
         // Event type analysis
         const eventTypes = {};
+        const PointCalculator = require('../utils/pointCalculator');
         events.forEach(event => {
-            const PointCalculator = require('../utils/pointCalculator');
             const eventName = PointCalculator.getEventName(event.eventType);
             if (!eventTypes[eventName]) {
                 eventTypes[eventName] = { count: 0, points: 0 };
