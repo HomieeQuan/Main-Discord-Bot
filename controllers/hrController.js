@@ -398,8 +398,8 @@ class HRController {
                 
                 for (let i = 0; i < sortedCompleted.length && i < 12; i++) {
                     const user = sortedCompleted[i];
-                    const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
-                        `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
+                    const rankEmoji = RankSystem.isSupervisorOrHigher(user.rankLevel) ? 
+                        `${RankSystem.getRankEmoji(user.rankLevel, user.unit || 'SWAT')} ` : '';
                     const position = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
                     const bonus = user.weeklyPoints > user.weeklyQuota ? 
                         ` (+${user.weeklyPoints - user.weeklyQuota})` : '';
@@ -471,8 +471,8 @@ class HRController {
                     const user = sortedIncomplete[i];
                     const percentage = Math.round((user.weeklyPoints / user.weeklyQuota) * 100);
                     const status = percentage >= 75 ? '⚠️' : percentage >= 50 ? '⏳' : '❌';
-                    const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
-                        `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
+                    const rankEmoji = RankSystem.isSupervisorOrHigher(user.rankLevel) ? 
+                        `${RankSystem.getRankEmoji(user.rankLevel, user.unit || 'SWAT')} ` : '';
                     
                     const line = `${status} ${rankEmoji}**${user.username}** - ${user.weeklyPoints}/${user.weeklyQuota} pts (${percentage}%)`;
                     
