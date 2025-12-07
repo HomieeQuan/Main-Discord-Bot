@@ -1,4 +1,4 @@
-// utils/permissionChecker.js - FIXED HR role name from "Executive Operator" to "HR | Executive Operator"
+// utils/permissionChecker.js - UPDATED: Only Medical Director has HR permissions, not Board of Medicine
 const ROLES = {
     // COMMANDER+ LEVEL (Emergency/Critical Access)
     COMMANDER: 'A | SWAT Commander',
@@ -7,12 +7,15 @@ const ROLES = {
     // MANAGEMENT LEVEL (HR+ Access)
     DEPUTY_COMMANDER: 'A | Deputy Commander',
     OPERATIONS_CHIEF: 'A | Chief of Operations',
-    // 🔧 FIXED: Changed from 'Executive Operator' to 'HR | Executive Operator'
+    // SWAT HR Roles
     EXECUTIVE_OPERATOR: 'HR | Executive Operator',
     SENIOR_EXECUTIVE_OPERATOR: 'Senior Executive Operator',
+    // CMU HR Roles (only Medical Director, NOT Board of Medicine)
+    MEDICAL_DIRECTOR: 'HR | Medical Director',
     
     // OPERATOR LEVEL (Basic Access)
-    SWAT_OPERATOR: 'Special Weapons and Tactics'
+    SWAT_OPERATOR: 'Special Weapons and Tactics',
+    CMU_OPERATOR: 'Critical Medical Unit'
 };
 
 // Role hierarchy levels (higher number = more permissions)
@@ -24,12 +27,15 @@ const ROLE_LEVELS = {
     // MANAGEMENT LEVEL (HR+)
     [ROLES.DEPUTY_COMMANDER]: 50,
     [ROLES.OPERATIONS_CHIEF]: 50,
-    // 🔧 FIXED: Now uses 'HR | Executive Operator' role name
+    // SWAT HR
     [ROLES.EXECUTIVE_OPERATOR]: 50,
     [ROLES.SENIOR_EXECUTIVE_OPERATOR]: 50,
+    // CMU HR (only Medical Director)
+    [ROLES.MEDICAL_DIRECTOR]: 50,
     
     // OPERATOR LEVEL
-    [ROLES.SWAT_OPERATOR]: 10
+    [ROLES.SWAT_OPERATOR]: 10,
+    [ROLES.CMU_OPERATOR]: 10
 };
 
 class PermissionChecker {
@@ -97,6 +103,27 @@ class PermissionChecker {
     static isBooster(member) {
         if (!member || !member.premiumSince) return false;
         return member.premiumSince !== null;
+    }
+
+    // ===== SPECIALIZED UNIT DETECTION =====
+    
+    // Check if user is in Special Operations Group (SOG)
+    static isSOG(member) {
+        if (!member || !member.roles) return false;
+        return member.roles.cache.some(role => role.name === 'Special Operations Group');
+    }
+
+    // Check if user is in Training and Evaluation Team (TET)
+    static isTET(member) {
+        if (!member || !member.roles) return false;
+        return member.roles.cache.some(role => role.name === 'Training and Evaluation Team');
+    }
+
+    // Get specialized unit for a member (returns 'SOG', 'TET', or null)
+    static getSpecializedUnit(member) {
+        if (this.isSOG(member)) return 'SOG';
+        if (this.isTET(member)) return 'TET';
+        return null;
     }
 
     // ===== COMMAND PERMISSION CHECKS =====

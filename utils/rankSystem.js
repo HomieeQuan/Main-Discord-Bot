@@ -1,142 +1,307 @@
-// utils/rankSystem.js - FIXED promotion eligibility to properly check rank locks
+// utils/rankSystem.js - SWAT Division with two units: SWAT Unit and CMU Unit
 class RankSystem {
-    // Complete 15-rank SWAT progression with your exact specifications
-    static ranks = [
-        // Junior Ranks (No Emojis)
+    // ================================
+    // SWAT RANK PROGRESSION (10 RANKS)
+    // ================================
+    static swatRanks = [
+        // === OPERATIONAL TIER (Regular Progression) ===
         { 
             level: 1, 
             name: 'Probationary Operator', 
-            pointsRequired: 0, 
-            rankLockDays: 0,
-            emoji: ''
+            pointsRequired: 0,  // Entry rank
+            rankLockDays: 1,
+            weeklyQuota: 10,
+            emoji: '',
+            unit: 'SWAT',
+            tier: 'operational',
+            handPicked: false
         },
         { 
             level: 2, 
             name: 'Junior Operator', 
-            pointsRequired: 25, 
-            rankLockDays: 1,
-            emoji: ''
+            pointsRequired: 65,
+            rankLockDays: 3,
+            weeklyQuota: 15,
+            emoji: '',
+            unit: 'SWAT',
+            tier: 'operational',
+            handPicked: false
         },
         { 
             level: 3, 
             name: 'Experienced Operator', 
-            pointsRequired: 30, 
-            rankLockDays: 3,
-            emoji: ''
+            pointsRequired: 100,
+            rankLockDays: 5,
+            weeklyQuota: 20,
+            emoji: '',
+            unit: 'SWAT',
+            tier: 'operational',
+            handPicked: false
         },
         { 
             level: 4, 
             name: 'Senior Operator', 
-            pointsRequired: 40, 
-            rankLockDays: 3,
-            emoji: ''
+            pointsRequired: 140,
+            rankLockDays: 7,
+            weeklyQuota: 20,
+            emoji: '',
+            unit: 'SWAT',
+            tier: 'operational',
+            handPicked: false
         },
         { 
             level: 5, 
             name: 'Specialized Operator', 
-            pointsRequired: 50, 
-            rankLockDays: 3,
-            emoji: ''
+            pointsRequired: 190,
+            rankLockDays: 7,
+            weeklyQuota: 25,
+            emoji: '',
+            unit: 'SWAT',
+            tier: 'operational',
+            handPicked: false
         },
         
-        // Elite Ranks (Thunder Bolt Progression)
+        // === SUPERVISOR TIER (Hand-picked entry, then earn progression) ===
         { 
             level: 6, 
-            name: 'Elite Operator', 
-            pointsRequired: 60, 
-            rankLockDays: 5,
-            emoji: '⚡'
+            name: 'Tactical Operator', 
+            pointsRequired: 0,  // HAND-PICKED (entry to supervisor track)
+            rankLockDays: 0,    // No lock for hand-picked rank
+            weeklyQuota: 30,
+            emoji: '⚡',
+            unit: 'SWAT',
+            tier: 'supervisor',
+            handPicked: true,
+            description: 'Hand-picked for supervisor track'
         },
         { 
             level: 7, 
-            name: 'Elite Operator I Class', 
-            pointsRequired: 80, 
-            rankLockDays: 5,
-            emoji: '⚡⚡'
+            name: 'Advanced Operator', 
+            pointsRequired: 250,  // Must earn from Tactical
+            rankLockDays: 10,
+            weeklyQuota: 30,
+            emoji: '⚡⚡',
+            unit: 'SWAT',
+            tier: 'supervisor',
+            handPicked: false
         },
         { 
             level: 8, 
-            name: 'Elite Operator II Class', 
-            pointsRequired: 90, 
-            rankLockDays: 5,
-            emoji: '⚡⚡⚡'
+            name: 'Elite Operator', 
+            pointsRequired: 320,  // Must earn from Advanced
+            rankLockDays: 14,
+            weeklyQuota: 30,
+            emoji: '⚡⚡⚡',
+            unit: 'SWAT',
+            tier: 'supervisor',
+            handPicked: false
         },
+        
+        // === HR TIER (Hand-picked only - NO RANK LOCKS) ===
         { 
             level: 9, 
-            name: 'Elite Operator III Class', 
-            pointsRequired: 100, 
-            rankLockDays: 7,
-            emoji: '⚡⚡⚡⚡'
+            name: 'Executive Operator', 
+            pointsRequired: 0,  // HAND-PICKED ONLY
+            rankLockDays: 0,    // No lock for hand-picked HR
+            weeklyQuota: 20,    // Level 9 has 20 point weekly quota
+            emoji: '⭐',
+            unit: 'SWAT',
+            tier: 'hr',
+            handPicked: true,
+            description: 'Hand-picked by Administration ONLY'
         },
         { 
             level: 10, 
-            name: 'Elite Operator IV Class', 
-            pointsRequired: 120, 
-            rankLockDays: 7,
-            emoji: '⚡⚡⚡⚡⚡'
-        },
-        
-        // Executive Ranks (Star System)
-        { 
-            level: 11, 
-            name: 'Executive Operator', 
-            pointsRequired: 300, 
-            rankLockDays: 0,  // Hand-picked, no lock
-            emoji: '⭐'
-        },
-        { 
-            level: 12, 
             name: 'Senior Executive Operator', 
-            pointsRequired: 0,  // Hand-picked only
-            rankLockDays: 0,
-            emoji: '⭐⭐'
-        },
-        
-        // Command Ranks (Leadership Symbols)
-        { 
-            level: 13, 
-            name: 'Operations Chief', 
-            pointsRequired: 0,  // Hand-picked only
-            rankLockDays: 0,
-            emoji: '🎖️'
-        },
-        { 
-            level: 14, 
-            name: 'Deputy Commander', 
-            pointsRequired: 0,  // Hand-picked only
-            rankLockDays: 0,
-            emoji: '🎖️⚔️'
-        },
-        { 
-            level: 15, 
-            name: 'SWAT Commander', 
-            pointsRequired: 0,  // Hand-picked only
-            rankLockDays: 0,
-            emoji: '👑'
+            pointsRequired: 0,  // HAND-PICKED ONLY
+            rankLockDays: 0,    // No lock for hand-picked HR
+            weeklyQuota: 20,    // Level 10 has 20 point weekly quota
+            emoji: '⭐⭐',
+            unit: 'SWAT',
+            tier: 'hr',
+            handPicked: true,
+            description: 'Hand-picked by Administration ONLY'
         }
     ];
 
-    // Get rank information by level
-    static getRankByLevel(level) {
-        return this.ranks.find(rank => rank.level === level) || this.ranks[0];
+    // ================================
+    // CMU RANK PROGRESSION (10 RANKS)
+    // ================================
+    static cmuRanks = [
+        // === OPERATIONAL TIER (Regular Progression) ===
+        { 
+            level: 1, 
+            name: 'Responder In Training', 
+            pointsRequired: 0,  // Entry rank
+            rankLockDays: 1,
+            weeklyQuota: 10,
+            emoji: '',
+            unit: 'CMU',
+            tier: 'operational',
+            handPicked: false
+        },
+        { 
+            level: 2, 
+            name: 'Field Medic', 
+            pointsRequired: 65,
+            rankLockDays: 3,
+            weeklyQuota: 15,
+            emoji: '',
+            unit: 'CMU',
+            tier: 'operational',
+            handPicked: false
+        },
+        { 
+            level: 3, 
+            name: 'Junior Field Medic', 
+            pointsRequired: 100,
+            rankLockDays: 5,
+            weeklyQuota: 20,
+            emoji: '',
+            unit: 'CMU',
+            tier: 'operational',
+            handPicked: false
+        },
+        { 
+            level: 4, 
+            name: 'Senior Field Medic', 
+            pointsRequired: 140,
+            rankLockDays: 7,
+            weeklyQuota: 20,
+            emoji: '',
+            unit: 'CMU',
+            tier: 'operational',
+            handPicked: false
+        },
+        { 
+            level: 5, 
+            name: 'Specialist', 
+            pointsRequired: 190,
+            rankLockDays: 7,
+            weeklyQuota: 25,
+            emoji: '',
+            unit: 'CMU',
+            tier: 'operational',
+            handPicked: false
+        },
+        
+        // === SUPERVISOR TIER (Hand-picked entry, then earn progression) ===
+        { 
+            level: 6, 
+            name: 'Medical Master Sergeant', 
+            pointsRequired: 0,  // HAND-PICKED (entry to supervisor track)
+            rankLockDays: 0,    // No lock for hand-picked rank
+            weeklyQuota: 30,
+            emoji: '⚕️',
+            unit: 'CMU',
+            tier: 'supervisor',
+            handPicked: true,
+            description: 'Hand-picked for supervisor track'
+        },
+        { 
+            level: 7, 
+            name: 'Emergency Coordinator', 
+            pointsRequired: 250,  // Must earn from Medical Master Sergeant
+            rankLockDays: 10,
+            weeklyQuota: 30,
+            emoji: '⚕️⚕️',
+            unit: 'CMU',
+            tier: 'supervisor',
+            handPicked: false
+        },
+        { 
+            level: 8, 
+            name: 'Chief Medical Officer', 
+            pointsRequired: 320,  // Must earn from Emergency Coordinator
+            rankLockDays: 14,
+            weeklyQuota: 30,
+            emoji: '⚕️⚕️⚕️',
+            unit: 'CMU',
+            tier: 'supervisor',
+            handPicked: false
+        },
+        
+        // === HR TIER (Hand-picked only - NO RANK LOCKS) ===
+        { 
+            level: 9, 
+            name: 'Board of Medicine', 
+            pointsRequired: 0,  // HAND-PICKED ONLY
+            rankLockDays: 0,    // No lock for hand-picked HR
+            weeklyQuota: 20,    // Level 9 has 20 point weekly quota
+            emoji: '🏥',
+            unit: 'CMU',
+            tier: 'hr',
+            handPicked: true,
+            description: 'Hand-picked by Administration ONLY'
+        },
+        { 
+            level: 10, 
+            name: 'Medical Director', 
+            pointsRequired: 0,  // HAND-PICKED ONLY
+            rankLockDays: 0,    // No lock for hand-picked HR
+            weeklyQuota: 20,    // Level 10 has 20 point weekly quota
+            emoji: '🏥⭐',
+            unit: 'CMU',
+            tier: 'hr',
+            handPicked: true,
+            description: 'Hand-picked by Administration ONLY'
+        }
+    ];
+
+    // ================================
+    // HELPER FUNCTIONS
+    // ================================
+
+    // Get rank by level and division
+    static getRankByLevel(level, unit = 'SWAT') {
+        const ranks = unit === 'CMU' ? this.cmuRanks : this.swatRanks;
+        return ranks.find(rank => rank.level === level) || ranks[0];
     }
 
-    // Get rank information by name
+    // Get rank by name (auto-detect division)
     static getRankByName(name) {
-        return this.ranks.find(rank => rank.name === name) || this.ranks[0];
+        // Try SWAT first
+        let rank = this.swatRanks.find(rank => rank.name === name);
+        if (rank) return rank;
+        
+        // Try CMU
+        rank = this.cmuRanks.find(rank => rank.name === name);
+        if (rank) return rank;
+        
+        // Default to SWAT Probationary
+        return this.swatRanks[0];
     }
 
     // Get next rank for a user
-    static getNextRank(currentLevel) {
+    static getNextRank(currentLevel, unit = 'SWAT') {
         const nextLevel = currentLevel + 1;
-        if (nextLevel > 15) return null; // Already at max rank
-        return this.getRankByLevel(nextLevel);
+        const ranks = unit === 'CMU' ? this.cmuRanks : this.swatRanks;
+        
+        if (nextLevel > 10) return null; // Already at max rank
+        return ranks.find(rank => rank.level === nextLevel) || null;
     }
 
-    // 🔧 NEW: Check if user meets point requirements (regardless of rank lock)
+    // Get all ranks for a division
+    static getAllRanks(unit = 'SWAT') {
+        return unit === 'CMU' ? this.cmuRanks : this.swatRanks;
+    }
+
+    // Get both division ranks (for admin reference)
+    static getAllDivisionRanks() {
+        return {
+            SWAT: this.swatRanks,
+            CMU: this.cmuRanks
+        };
+    }
+
+    // ================================
+    // PROMOTION ELIGIBILITY CHECKING
+    // ================================
+
+    // Check if user meets point requirements (regardless of rank lock)
     static checkPointRequirements(user) {
-        const currentRank = this.getRankByLevel(user.rankLevel || 1);
-        const nextRank = this.getNextRank(user.rankLevel || 1);
+        const currentRank = this.getRankByLevel(user.rankLevel || 1, user.unit || 'SWAT');
+        const nextRank = this.getNextRank(user.rankLevel || 1, user.unit || 'SWAT');
         
         if (!nextRank) {
             return {
@@ -148,18 +313,18 @@ class RankSystem {
             };
         }
 
-        // For Executive+ ranks (hand-picked only)
-        if (nextRank.level >= 11) {
+        // For hand-picked ranks
+        if (nextRank.handPicked) {
             return {
                 pointsMet: false,
-                reason: 'Executive ranks are hand-picked only',
+                reason: `${nextRank.name} is hand-picked only`,
                 handPickedOnly: true,
                 currentRank,
                 nextRank
             };
         }
 
-        // Check rank points regardless of rank lock
+        // Check rank points
         const rankPoints = user.rankPoints || 0;
         const pointsRequired = nextRank.pointsRequired;
         const hasEnoughPoints = rankPoints >= pointsRequired;
@@ -176,10 +341,10 @@ class RankSystem {
         };
     }
 
-    // 🔧 FIXED: Check promotion eligibility with corrected rank lock logic
+    // FIXED: Check promotion eligibility with corrected rank lock logic
     static checkPromotionEligibility(user) {
-        const currentRank = this.getRankByLevel(user.rankLevel || 1);
-        const nextRank = this.getNextRank(user.rankLevel || 1);
+        const currentRank = this.getRankByLevel(user.rankLevel || 1, user.unit || 'SWAT');
+        const nextRank = this.getNextRank(user.rankLevel || 1, user.unit || 'SWAT');
         
         if (!nextRank) {
             return {
@@ -203,7 +368,7 @@ class RankSystem {
             met: hasEnoughPoints
         };
     
-        // 🔧 CRITICAL FIX: Check if user is actually rank locked
+        // Check if user is rank locked
         const isRankLocked = this.isUserRankLocked(user);
         
         if (isRankLocked) {
@@ -235,11 +400,11 @@ class RankSystem {
             };
         }
     
-        // For Executive+ ranks (hand-picked only)
-        if (nextRank.level >= 11) {
+        // For hand-picked ranks
+        if (nextRank.handPicked) {
             return {
                 eligible: false,
-                reason: 'Executive ranks are hand-picked only',
+                reason: `${nextRank.name} is hand-picked only`,
                 handPickedOnly: true,
                 currentRank,
                 nextRank,
@@ -258,47 +423,45 @@ class RankSystem {
         };
     }
 
-    // 🔧 NEW: Simple check if user is currently rank locked
+    // Check if user is currently rank locked
     static isUserRankLocked(user) {
-        // No rank lock set = not locked
-        if (!user.rankLockUntil) {
-            return false;
-        }
+        if (!user.rankLockUntil) return false;
         
-        // Check if lock has expired
         const nowUTC = new Date();
         const lockExpiryUTC = new Date(user.rankLockUntil);
         
-        // If lock expiry is in the future, user is locked
         return lockExpiryUTC > nowUTC;
     }
 
+    // ================================
+    // RANK FORMATTING & DISPLAY
+    // ================================
+
     // Format rank display with emoji
     static formatRank(user) {
-        const rank = this.getRankByLevel(user.rankLevel || 1);
+        const rank = this.getRankByLevel(user.rankLevel || 1, user.unit || 'SWAT');
         return rank.emoji ? `${rank.emoji} ${rank.name}` : rank.name;
     }
 
     // Get just the emoji for a rank level
-    static getRankEmoji(level) {
-        const rank = this.getRankByLevel(level);
+    static getRankEmoji(level, unit = 'SWAT') {
+        const rank = this.getRankByLevel(level, unit);
         return rank.emoji || '';
     }
 
-    // Get all ranks (for display/reference)
-    static getAllRanks() {
-        return this.ranks;
+    // Check if rank is supervisor or higher (has emoji)
+    static isSupervisorOrHigher(level) {
+        return level >= 6; // Tactical Operator / Medical Master Sergeant and above
     }
 
-    // Check if rank is elite or higher (has emoji)
-    static isEliteOrHigher(level) {
-        return level >= 6; // Elite Operator and above
+    // Check if rank is HR (hand-picked leadership)
+    static isHRRank(level) {
+        return level >= 9; // Executive Operator / Board of Medicine and above
     }
 
-    // Check if rank is executive or higher (hand-picked)
-    static isExecutiveOrHigher(level) {
-        return level >= 11; // Executive Operator and above
-    }
+    // ================================
+    // RANK PROGRESS & BARS
+    // ================================
 
     // Calculate rank progress percentage
     static getRankProgress(user) {
@@ -307,9 +470,7 @@ class RankSystem {
         if (eligibility.maxRank) return { percentage: 100, isMaxRank: true };
         if (eligibility.handPickedOnly) return { percentage: 100, isHandPicked: true };
         
-        // 🔧 FIXED: Always return requirements if they exist
         if (!eligibility.requirements) {
-            // Fallback for edge cases
             return { 
                 percentage: 0,
                 current: 0,
@@ -329,7 +490,6 @@ class RankSystem {
             remaining: eligibility.requirements.pointsRemaining
         };
     }
-    
 
     // Create progress bar for rank progression
     static createRankProgressBar(user, length = 10) {
@@ -338,9 +498,8 @@ class RankSystem {
         if (progress.isMaxRank) return '[████████████] MAX RANK';
         if (progress.isHandPicked) return '[████████████] HAND-PICKED';
         
-        // 🔧 FIXED: Ensure we have valid numbers
         const currentPoints = progress.current || 0;
-        const requiredPoints = progress.required || 1; // Avoid division by zero
+        const requiredPoints = progress.required || 1;
         const percentage = progress.percentage || 0;
         
         const filledLength = Math.floor((percentage / 100) * length);
@@ -352,17 +511,20 @@ class RankSystem {
         return `[${filledBar}${emptyBar}] ${currentPoints}/${requiredPoints} pts (${percentage}%)`;
     }
 
+    // ================================
+    // RANK LOCK MANAGEMENT
+    // ================================
+
     // Apply rank lock when user gets promoted
     static applyRankLock(user, newRankLevel) {
-        const newRank = this.getRankByLevel(newRankLevel);
+        const newRank = this.getRankByLevel(newRankLevel, user.unit || 'SWAT');
         
         if (newRank.rankLockDays > 0) {
-            // FIXED: Use UTC and set to a specific time (6 AM UTC) for consistency
             const lockDate = new Date();
             lockDate.setUTCDate(lockDate.getUTCDate() + newRank.rankLockDays);
-            lockDate.setUTCHours(6, 0, 0, 0); // 6 AM UTC for consistency with automation
+            lockDate.setUTCHours(6, 0, 0, 0); // 6 AM UTC for consistency
             
-            console.log(`🔒 TIMEZONE: Applied ${newRank.rankLockDays} day lock until ${lockDate.toISOString()} (${lockDate.toLocaleString('en-US', { timeZone: 'America/New_York' })} EST)`);
+            console.log(`🔒 Applied ${newRank.rankLockDays} day lock until ${lockDate.toISOString()}`);
             
             return {
                 locked: true,
@@ -374,30 +536,24 @@ class RankSystem {
         return { locked: false };
     }
 
-    // 🔧 FIXED: Check if user's rank lock has expired (for automation/notifications)
+    // Check if user's rank lock has expired
     static checkRankLockExpiry(user) {
         if (!user.rankLockUntil) {
-            console.log(`🔓 User ${user.username} has no rank lock set`);
             return { 
-                expired: true,  // 🔧 FIXED: No lock = considered expired (available)
-                needsNotification: false  // No notification needed
+                expired: true,
+                needsNotification: false
             };
         }
         
-        // FIXED: Use UTC for consistent timezone handling
         const nowUTC = new Date();
         const lockExpiryUTC = new Date(user.rankLockUntil);
-        
-        console.log(`🕒 TIMEZONE DEBUG: ${user.username} - Now: ${nowUTC.toISOString()}, Lock expires: ${lockExpiryUTC.toISOString()}`);
         
         const hasExpired = lockExpiryUTC <= nowUTC;
         
         if (hasExpired) {
-            const wasNotified = user.rankLockNotified;
-            console.log(`🔓 User ${user.username} rank lock has EXPIRED, notified: ${wasNotified}`);
             return {
                 expired: true,
-                needsNotification: !wasNotified
+                needsNotification: !user.rankLockNotified
             };
         }
         
@@ -406,10 +562,8 @@ class RankSystem {
         const hoursRemaining = Math.ceil(timeDiffMs / (1000 * 60 * 60));
         const daysRemaining = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24));
         
-        // Discord timestamp for user display
         const discordTimestamp = Math.floor(lockExpiryUTC.getTime() / 1000);
         
-        // Formatted EST time for notifications/logs
         const estTime = lockExpiryUTC.toLocaleString('en-US', { 
             timeZone: 'America/New_York',
             weekday: 'short',
@@ -420,8 +574,6 @@ class RankSystem {
             timeZoneName: 'short'
         });
         
-        console.log(`🔒 User ${user.username} rank lock active for ${daysRemaining} more days (${hoursRemaining} hours) - Expires: ${estTime}`);
-        
         return {
             expired: false,
             daysRemaining,
@@ -430,6 +582,41 @@ class RankSystem {
             discordTimestamp,
             estTimeFormatted: estTime
         };
+    }
+
+    // ================================
+    // UNIT UTILITIES
+    // ================================
+
+    // Get unit color for embeds
+    static getUnitColor(unit) {
+        return unit === 'CMU' ? '#ff0000' : '#0099ff'; // Red for CMU, Blue for SWAT
+    }
+
+    // Get unit emoji
+    static getUnitEmoji(unit) {
+        return unit === 'CMU' ? '🏥' : '🛡️';
+    }
+
+    // Validate unit
+    static isValidUnit(unit) {
+        return unit === 'SWAT' || unit === 'CMU';
+    }
+
+    // ================================
+    // LEGACY COMPATIBILITY FUNCTIONS
+    // ================================
+
+    // Check if rank is Executive or higher (HR tier)
+    static isExecutiveOrHigher(rankLevel, unit = 'SWAT') {
+        // HR tier is levels 9-10 for both divisions
+        return rankLevel >= 9;
+    }
+
+    // Check if a rank is hand-picked
+    static isHandPickedRank(rankLevel, unit = 'SWAT') {
+        const rank = this.getRankByLevel(rankLevel, unit);
+        return rank ? rank.handPicked : false;
     }
 }
 

@@ -1,6 +1,6 @@
+// models/SWATUser.js - UPDATED: Dual-division support (SWAT + CMU)
 const mongoose = require('mongoose')
 
-// SWAT User model with complete rank progression system
 const swatUserSchema = new mongoose.Schema({
     discordId: {
         type: String,
@@ -10,6 +10,21 @@ const swatUserSchema = new mongoose.Schema({
     username: {
         type: String,
         required: true
+    },
+    
+    // Unit field (SWAT or CMU - both are units within the SWAT division)
+    unit: {
+        type: String,
+        enum: ['SWAT', 'CMU'],
+        default: 'SWAT',
+        required: true
+    },
+    
+    // NEW: Specialized Unit (SOG or TET badges)
+    specializedUnit: {
+        type: String,
+        enum: ['SOG', 'TET', null],
+        default: null
     },
     
     // EXISTING POINT SYSTEM (for leaderboards and quota)
@@ -89,14 +104,14 @@ const swatUserSchema = new mongoose.Schema({
         default: null
     },
     
-    // NEW: RANK PROGRESSION SYSTEM
+    // RANK PROGRESSION SYSTEM (now division-aware)
     rankName: {
         type: String,
-        default: 'Probationary Operator'  // Starting rank
+        default: 'Probationary Operator'  // SWAT default - will be 'Responder In Training' for CMU
     },
     rankLevel: {
         type: Number,
-        default: 1  // Level 1 = Probationary Operator
+        default: 1  // Level 1 for both divisions
     },
     rankPoints: {
         type: Number,
@@ -143,7 +158,7 @@ const swatUserSchema = new mongoose.Schema({
         },
         promotionType: {
             type: String,
-            enum: ['standard', 'force', 'bypass_lock'],
+            enum: ['standard', 'force', 'bypass_lock', 'hand_picked'],
             default: 'standard'
         },
         reason: String,
@@ -193,7 +208,7 @@ swatUserSchema.index({ isBooster: 1, weeklyPoints: -1 }, {
     background: true 
 });
 
-// NEW: Rank system indexes
+// Rank system indexes
 swatUserSchema.index({ rankLevel: -1 }, { 
     name: 'rank_level_idx',
     background: true 
@@ -210,7 +225,7 @@ swatUserSchema.index({ rankLockUntil: 1 }, {
     sparse: true
 });
 
-// Compound indexes for advanced queries
+// Compound indexes
 swatUserSchema.index({ rankLevel: -1, allTimePoints: -1 }, { 
     name: 'rank_performance_idx',
     background: true 
@@ -221,6 +236,43 @@ swatUserSchema.index({ promotionEligible: 1, rankLevel: 1 }, {
     background: true 
 });
 
+// NEW: Division-specific indexes
+swatUserSchema.index({ division: 1, weeklyPoints: -1 }, { 
+    name: 'division_weekly_leaderboard_idx',
+    background: true 
+});
+
+swatUserSchema.index({ division: 1, allTimePoints: -1 }, { 
+    name: 'division_alltime_leaderboard_idx',
+    background: true 
+});
+
+swatUserSchema.index({ division: 1, rankLevel: -1 }, { 
+    name: 'division_rank_idx',
+    background: true 
+});
+
+swatUserSchema.index({ division: 1, quotaCompleted: 1 }, { 
+    name: 'division_quota_idx',
+    background: true 
+});
+
+// NEW: Specialized unit index
+swatUserSchema.index({ specializedUnit: 1 }, { 
+    name: 'specialized_unit_idx',
+    background: true,
+    sparse: true
+});
+
 console.log('✅ SWATUser indexes configured successfully');
+
+// NEW: Pre-save hook to set default rank name based on division
+swatUserSchema.pre('save', function(next) {
+    // If this is a new user and rankName hasn't been set manually
+    if (this.isNew && this.rankName === 'Probationary Operator' && this.unit === 'CMU') {
+        this.rankName = 'Responder In Training';
+    }
+    next();
+});
 
 module.exports = mongoose.model('SWATUser', swatUserSchema);

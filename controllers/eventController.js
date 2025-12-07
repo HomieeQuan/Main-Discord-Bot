@@ -148,8 +148,30 @@ class EventController {
                     if (user.rankLevel === undefined || user.rankLevel === null) user.rankLevel = 1;
                 }
 
-                // Step 5: Calculate points
+                // Step 5: Sync user metadata in real-time (booster, username, specialized unit)
                 const isBooster = PermissionChecker.isBooster(interaction.member);
+                const currentUsername = interaction.member.displayName || interaction.user.username;
+                const specializedUnit = PermissionChecker.getSpecializedUnit(interaction.member);
+                
+                // Update user metadata if changed
+                if (user.isBooster !== isBooster) {
+                    console.log(`🔄 Booster status updated: ${user.username} ${user.isBooster ? 'WAS' : 'NOT'} booster → ${isBooster ? 'IS' : 'NOT'} booster`);
+                    user.isBooster = isBooster;
+                }
+                
+                if (user.username !== currentUsername) {
+                    console.log(`🔄 Username updated: ${user.username} → ${currentUsername}`);
+                    user.username = currentUsername;
+                }
+                
+                if (user.specializedUnit !== specializedUnit) {
+                    const oldUnit = user.specializedUnit || 'None';
+                    const newUnit = specializedUnit || 'None';
+                    console.log(`🔄 Specialized unit updated: ${user.username} ${oldUnit} → ${newUnit}`);
+                    user.specializedUnit = specializedUnit;
+                }
+                
+                // Step 6: Calculate points with booster multiplier
                 const basePointsPerEvent = PointCalculator.calculateBasePoints(eventType);
                 
                 const isTryoutEvent = eventType === 'tet_private' || eventType === 'tet_public';
@@ -159,7 +181,7 @@ class EventController {
                 const actualPointsPerEvent = isBooster ? pointsPerEventWithBonus * 2 : pointsPerEventWithBonus;
                 const totalPoints = actualPointsPerEvent * quantity;
 
-                // Step 6: Check promotion status BEFORE awarding points
+                // Step 7: Check promotion status BEFORE awarding points
                 console.log(`🔍 DEBUG: About to check promotion eligibility - user rankPoints: ${user.rankPoints}, rankLevel: ${user.rankLevel}`);
                 
                 const pointsBefore = RankSystem.checkPointRequirements(user);
@@ -167,7 +189,7 @@ class EventController {
                 
                 console.log(`📊 BEFORE points: User ${user.username} pointsMet: ${pointsWereMetBefore}, rankPoints: ${user.rankPoints || 0}`);
 
-                // Step 7: FIXED - Atomic point updates
+                // Step 8: FIXED - Atomic point updates
                 const oldWeeklyPoints = user.weeklyPoints || 0;
                 const oldAllTimePoints = user.allTimePoints || 0;
                 const oldRankPoints = user.rankPoints || 0;
@@ -386,6 +408,74 @@ class EventController {
                             embeds: [fallbackNotification], 
                             ephemeral: true 
                         });
+                    }
+                    
+                    // NEW: Notify HR team about promotion eligibility
+                    try {
+                        // Re-check rank lock status for HR notification
+                        const lockStatus = RankSystem.checkRankLockExpiry(user);
+                        const isCurrentlyLocked = !lockStatus.expired && lockStatus.daysRemaining;
+                        
+                        // Get all HR members
+                        const guild = interaction.guild;
+                        const hrMembers = guild.members.cache.filter(member => 
+                            PermissionChecker.isHRPlus(member) && !member.user.bot
+                        );
+                        
+                        const unit = user.unit || 'SWAT';
+                        const divisionEmoji = division === 'CMU' ? '🏥' : '🛡️';
+                        
+                        const hrNotification = new EmbedBuilder()
+                            .setColor('#ffaa00')
+                            .setTitle(`${divisionEmoji} Promotion Eligibility Alert`)
+                            .setDescription(`**${user.username}** is now eligible for promotion review!`)
+                            .addFields(
+                                {
+                                    name: '👤 Operator',
+                                    value: `<@${user.discordId}>`,
+                                    inline: true
+                                },
+                                {
+                                    name: '🏢 Unit',
+                                    value: `${divisionEmoji} ${division}`,
+                                    inline: true
+                                },
+                                {
+                                    name: '⬆️ Eligible For',
+                                    value: `${RankSystem.formatRank(user)} → ${RankSystem.getRankEmoji(pointsAfter.nextRank.level)} **${pointsAfter.nextRank.name}**`,
+                                    inline: false
+                                },
+                                {
+                                    name: '📊 Stats',
+                                    value: `Rank Points: ${user.rankPoints}/${pointsAfter.nextRank.pointsRequired}\nAll-Time: ${user.allTimePoints} pts\nWeekly: ${user.weeklyPoints} pts`,
+                                    inline: false
+                                },
+                                {
+                                    name: '🔒 Rank Lock',
+                                    value: isCurrentlyLocked ? 
+                                        `🔒 Currently locked until <t:${Math.floor(new Date(user.rankLockUntil).getTime() / 1000)}:R>` : 
+                                        '✅ No lock - ready for promotion!',
+                                    inline: false
+                                }
+                            )
+                            .setFooter({ text: 'Use /promote-operator review to process this promotion' })
+                            .setTimestamp();
+                        
+                        // Send DM to all HR members
+                        let hrNotified = 0;
+                        for (const [id, member] of hrMembers) {
+                            try {
+                                await member.send({ embeds: [hrNotification] });
+                                hrNotified++;
+                            } catch (hrDmError) {
+                                console.log(`⚠️ Could not DM HR member ${member.displayName} (DMs disabled)`);
+                            }
+                        }
+                        
+                        console.log(`📢 HR NOTIFICATION: ${hrNotified}/${hrMembers.size} HR members notified about ${user.username}'s promotion eligibility`);
+                        
+                    } catch (hrNotifyError) {
+                        console.error('❌ HR notification error:', hrNotifyError);
                     }
                 }
 

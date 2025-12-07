@@ -3,6 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const PermissionChecker = require('../utils/permissionChecker');
 const RankSystem = require('../utils/rankSystem');
+const QuotaSystem = require('../utils/quotaSystem');
 const ProgressBarGenerator = require('../utils/progressBar');
 
 module.exports = {
@@ -171,27 +172,30 @@ module.exports = {
         // Generate all user lines
         for (let i = 0; i < users.length; i++) {
             const user = users[i];
-            const rankEmoji = RankSystem.isEliteOrHigher(user.rankLevel) ? 
-                `${RankSystem.getRankEmoji(user.rankLevel)} ` : '';
+            // Show emoji for supervisor+ ranks (levels 6-10)
+            const rankEmoji = RankSystem.isSupervisorOrHigher(user.rankLevel) ? 
+                `${RankSystem.getRankEmoji(user.rankLevel, user.unit || 'SWAT')} ` : '';
             
             if (isCompleted) {
                 // Completed users
-                const bonus = user.weeklyPoints > user.weeklyQuota ? 
-                    ` (+${user.weeklyPoints - user.weeklyQuota})` : '';
-                const progressBar = ProgressBarGenerator.createMiniProgressBar(user.weeklyPoints, user.weeklyQuota, 10);
-                allLines.push(`${rankEmoji}**${user.username}**\n${progressBar} ${user.weeklyPoints}/${user.weeklyQuota} pts${bonus}`);
+                const correctQuota = QuotaSystem.getUserQuota(user);
+                const bonus = user.weeklyPoints > correctQuota ? 
+                    ` (+${user.weeklyPoints - correctQuota})` : '';
+                const progressBar = ProgressBarGenerator.createMiniProgressBar(user.weeklyPoints, correctQuota, 10);
+                allLines.push(`${rankEmoji}**${user.username}**\n${progressBar} ${user.weeklyPoints}/${correctQuota} pts${bonus}`);
             } else {
                 // Incomplete users
-                const percentage = Math.round((user.weeklyPoints / user.weeklyQuota) * 100);
-                const remaining = user.weeklyQuota - user.weeklyPoints;
+                const correctQuota = QuotaSystem.getUserQuota(user);
+                const percentage = Math.round((user.weeklyPoints / correctQuota) * 100);
+                const remaining = correctQuota - user.weeklyPoints;
                 
                 // Color coding for status
                 let status = '⏳';
                 if (percentage >= 75) status = '⚠️';
                 else if (percentage < 50) status = '❌';
                 
-                const progressBar = ProgressBarGenerator.createMiniProgressBar(user.weeklyPoints, user.weeklyQuota, 10);
-                allLines.push(`${status} ${rankEmoji}**${user.username}**\n${progressBar} ${user.weeklyPoints}/${user.weeklyQuota} pts (${percentage}%) - ${remaining} needed`);
+                const progressBar = ProgressBarGenerator.createMiniProgressBar(user.weeklyPoints, correctQuota, 10);
+                allLines.push(`${status} ${rankEmoji}**${user.username}**\n${progressBar} ${user.weeklyPoints}/${correctQuota} pts (${percentage}%) - ${remaining} needed`);
             }
         }
 

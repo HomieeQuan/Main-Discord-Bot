@@ -1,5 +1,5 @@
-// commands/promote-operator.js - FIXED force promotion permissions to allow HR+ instead of Commander+ only
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// commands/promote-operator.js - Promotion system for SWAT and CMU units
+const { SlashCommandBuilder, EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ComponentType } = require('discord.js');
 const SWATUser = require('../models/SWATUser');
 const EventLog = require('../models/EventLog');
 const PermissionChecker = require('../utils/permissionChecker');
@@ -33,52 +33,28 @@ module.exports = {
                         .setRequired(false)))
         .addSubcommand(subcommand =>
             subcommand
-                .setName('deny')
-                .setDescription('Deny a promotion with reason')
-                .addUserOption(option =>
-                    option.setName('user')
-                        .setDescription('User to deny promotion for')
-                        .setRequired(true))
-                .addStringOption(option =>
-                    option.setName('reason')
-                        .setDescription('Reason for denial')
-                        .setRequired(true)))
-        .addSubcommand(subcommand =>
-            subcommand
                 .setName('list-eligible')
                 .setDescription('List all users eligible for promotion'))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('force')
-                .setDescription('🔧 FIXED: Force promote user (HR+ can now use this)')
+                .setDescription('Force promote user to specific rank (uses dropdown menu)')
                 .addUserOption(option =>
                     option.setName('user')
                         .setDescription('User to force promote')
                         .setRequired(true))
                 .addStringOption(option =>
-                    option.setName('rank')
-                        .setDescription('Target rank name')
-                        .setRequired(true)
-                        .addChoices(
-                            { name: 'Junior Operator', value: 'Junior Operator' },
-                            { name: 'Experienced Operator', value: 'Experienced Operator' },
-                            { name: 'Senior Operator', value: 'Senior Operator' },
-                            { name: 'Specialized Operator', value: 'Specialized Operator' },
-                            { name: 'Elite Operator', value: 'Elite Operator' },
-                            { name: 'Elite Operator I Class', value: 'Elite Operator I Class' },
-                            { name: 'Elite Operator II Class', value: 'Elite Operator II Class' },
-                            { name: 'Elite Operator III Class', value: 'Elite Operator III Class' },
-                            { name: 'Elite Operator IV Class', value: 'Elite Operator IV Class' },
-                            { name: 'Executive Operator', value: 'Executive Operator' },
-                            { name: 'Senior Executive Operator', value: 'Senior Executive Operator' },
-                            { name: 'Operations Chief', value: 'Operations Chief' },
-                            { name: 'Deputy Commander', value: 'Deputy Commander' },
-                            { name: 'SWAT Commander', value: 'SWAT Commander' }
-                        ))
-                .addStringOption(option =>
                     option.setName('reason')
                         .setDescription('Reason for force promotion')
-                        .setRequired(true)))
+                        .setRequired(true))
+                .addStringOption(option =>
+                    option.setName('unit')
+                        .setDescription('Unit (defaults to user\'s current unit - SWAT or CMU)')
+                        .setRequired(false)
+                        .addChoices(
+                            { name: '🛡️ SWAT Unit', value: 'SWAT' },
+                            { name: '🏥 CMU Unit', value: 'CMU' }
+                        )))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('bypass-lock')
@@ -91,77 +67,16 @@ module.exports = {
                     option.setName('reason')
                         .setDescription('Reason for bypassing rank lock')
                         .setRequired(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('set-rank')
-                .setDescription('Set initial rank for user (migration tool)')
-                .addUserOption(option =>
-                    option.setName('user')
-                        .setDescription('User to set rank for')
-                        .setRequired(true))
-                .addStringOption(option =>
-                    option.setName('rank')
-                        .setDescription('Rank to set')
-                        .setRequired(true)
-                        .addChoices(
-                            { name: 'Probationary Operator', value: 'Probationary Operator' },
-                            { name: 'Junior Operator', value: 'Junior Operator' },
-                            { name: 'Experienced Operator', value: 'Experienced Operator' },
-                            { name: 'Senior Operator', value: 'Senior Operator' },
-                            { name: 'Specialized Operator', value: 'Specialized Operator' },
-                            { name: 'Elite Operator', value: 'Elite Operator' },
-                            { name: 'Elite Operator I Class', value: 'Elite Operator I Class' },
-                            { name: 'Elite Operator II Class', value: 'Elite Operator II Class' },
-                            { name: 'Elite Operator III Class', value: 'Elite Operator III Class' },
-                            { name: 'Elite Operator IV Class', value: 'Elite Operator IV Class' },
-                            { name: 'Executive Operator', value: 'Executive Operator' },
-                            { name: 'Senior Executive Operator', value: 'Senior Executive Operator' },
-                            { name: 'Operations Chief', value: 'Operations Chief' },
-                            { name: 'Deputy Commander', value: 'Deputy Commander' },
-                            { name: 'SWAT Commander', value: 'SWAT Commander' }
-                        ))
-                .addIntegerOption(option =>
-                    option.setName('rank-points')
-                        .setDescription('Set rank points toward next promotion (optional)')
-                        .setRequired(false)
-                        .setMinValue(0)
-                        .setMaxValue(500)))
         .setDMPermission(false),
 
     async execute(interaction) {
-        // Check HR permission for all promotion commands
-        if (!PermissionChecker.canManageSystem(interaction.member)) {
-            const errorEmbed = SWATEmbeds.createErrorEmbed('🚫 Only HR can use promotion commands!');
+        // Check HR permission
+        if (!PermissionChecker.canManagePromotions(interaction.member)) {
+            const errorEmbed = SWATEmbeds.createErrorEmbed('Only HR can use promotion commands!');
             return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
 
         const subcommand = interaction.options.getSubcommand();
-
-        // 🔧 ISSUE #5 FIX: Force promotion now has separate permission check
-        if (subcommand === 'force') {
-            // Check specific force promotion permission (now allows HR+)
-            if (!PermissionChecker.canForcePromotions(interaction.member)) {
-                const errorMessage = PermissionChecker.getPermissionErrorMessage('hr');
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle('🚫 Force Promotion Access Denied')
-                    .setDescription(errorMessage)
-                    .addFields({
-                        name: '🎯 Required Permission Level',
-                        value: '**HR | Executive Operator** or higher role required for force promotions',
-                        inline: false
-                    })
-                    .addFields({
-                        name: '✅ What Changed',
-                        value: 'Force promotions are now available to all HR+ roles (previously Commander+ only)',
-                        inline: false
-                    })
-                    .setFooter({ text: 'This change allows HR team flexibility in promotion management' })
-                    .setTimestamp();
-                
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-            }
-        }
 
         switch (subcommand) {
             case 'review':
@@ -170,739 +85,518 @@ module.exports = {
             case 'approve':
                 await this.approvePromotion(interaction);
                 break;
-            case 'deny':
-                await this.denyPromotion(interaction);
-                break;
             case 'list-eligible':
-                await this.listEligibleUsers(interaction);
+                await this.listEligible(interaction);
                 break;
             case 'force':
-                await this.forcePromote(interaction);
+                await this.forcePromotion(interaction);
                 break;
             case 'bypass-lock':
-                await this.bypassRankLock(interaction);
-                break;
-            case 'set-rank':
-                await this.setUserRank(interaction);
+                await this.bypassLock(interaction);
                 break;
         }
     },
 
+    // Review promotion eligibility
     async reviewPromotion(interaction) {
         const targetUser = interaction.options.getUser('user');
-        
+
         try {
             const user = await SWATUser.findOne({ discordId: targetUser.id });
+
             if (!user) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} is not in the database.`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
+            // Check promotion eligibility
             const eligibility = RankSystem.checkPromotionEligibility(user);
-            const progress = RankSystem.getRankProgress(user);
-            const lockStatus = RankSystem.checkRankLockExpiry(user);
-            
+            const unit = user.unit || 'SWAT';
+            const divisionEmoji = unit === 'CMU' ? '🏥' : '🛡️';
+
             const embed = new EmbedBuilder()
                 .setColor(eligibility.eligible ? '#00ff00' : '#ffaa00')
-                .setTitle(`🎖️ Promotion Review - ${user.username}`)
+                .setTitle(`${divisionEmoji} Promotion Review: ${targetUser.username}`)
                 .setThumbnail(targetUser.displayAvatarURL())
                 .addFields(
-                    { 
-                        name: '🏅 Current Rank', 
-                        value: RankSystem.formatRank(user), 
-                        inline: true 
+                    {
+                        name: '👤 Current Rank',
+                        value: RankSystem.formatRank(user),
+                        inline: true
                     },
-                    { 
-                        name: '📊 Performance Stats', 
-                        value: `All-Time: ${user.allTimePoints} pts\nWeekly: ${user.weeklyPoints} pts\nTotal Events: ${user.totalEvents}`, 
-                        inline: true 
+                    {
+                        name: '🏢 Unit',
+                        value: `${divisionEmoji} ${unit}`,
+                        inline: true
                     }
                 );
 
-            // Rank lock status
-            if (!lockStatus.expired && lockStatus.daysRemaining) {
-                embed.addFields({
-                    name: '🔒 Rank Lock Status',
-                    value: `Locked for ${lockStatus.daysRemaining} more days`,
-                    inline: true
-                });
-            } else {
-                embed.addFields({
-                    name: '🔓 Rank Lock Status',
-                    value: 'Not locked - available for promotion',
-                    inline: true
-                });
-            }
-
-            // Next rank information
-            if (eligibility.nextRank) {
+            if (eligibility.eligible) {
+                // User is eligible!
                 embed.addFields(
-                    { 
-                        name: '⬆️ Next Rank', 
-                        value: `${RankSystem.getRankEmoji(eligibility.nextRank.level)} ${eligibility.nextRank.name}`, 
-                        inline: true 
+                    {
+                        name: '✅ Status',
+                        value: '**ELIGIBLE FOR PROMOTION**',
+                        inline: false
+                    },
+                    {
+                        name: '⬆️ Next Rank',
+                        value: RankSystem.formatRank({ 
+                            rankLevel: eligibility.nextRank.level, 
+                            rankName: eligibility.nextRank.name,
+                            unit 
+                        }),
+                        inline: true
+                    },
+                    {
+                        name: '📊 Rank Points',
+                        value: `${eligibility.requirements.currentPoints}/${eligibility.requirements.pointsRequired} ✅`,
+                        inline: true
+                    },
+                    {
+                        name: '💡 Next Steps',
+                        value: 'Use `/promote-operator approve` to promote this user.',
+                        inline: false
                     }
                 );
-
-                // Promotion requirements
-                if (!RankSystem.isExecutiveOrHigher(eligibility.nextRank.level)) {
-                    embed.addFields({
-                        name: '📈 Rank Progress',
+            } else if (eligibility.rankLocked) {
+                // Rank locked
+                embed.addFields(
+                    {
+                        name: '🔒 Status',
+                        value: '**RANK LOCKED**',
+                        inline: false
+                    },
+                    {
+                        name: '⏰ Lock Expires',
+                        value: `<t:${eligibility.discordTimestamp}:R> (${eligibility.lockExpiryFormatted})`,
+                        inline: true
+                    },
+                    {
+                        name: '📅 Days Remaining',
+                        value: `${eligibility.daysRemaining} days`,
+                        inline: true
+                    },
+                    {
+                        name: '💡 Next Steps',
+                        value: 'Use `/promote-operator bypass-lock` to remove lock if needed.',
+                        inline: false
+                    }
+                );
+            } else if (eligibility.handPickedOnly) {
+                // Hand-picked rank
+                embed.addFields(
+                    {
+                        name: '⭐ Status',
+                        value: '**HAND-PICKED RANK REQUIRED**',
+                        inline: false
+                    },
+                    {
+                        name: '⬆️ Next Rank',
+                        value: eligibility.nextRank.name,
+                        inline: true
+                    },
+                    {
+                        name: '💡 Next Steps',
+                        value: 'Use `/promote-operator force` to hand-pick user for this rank.',
+                        inline: false
+                    }
+                );
+            } else if (eligibility.maxRank) {
+                // Max rank
+                embed.addFields(
+                    {
+                        name: '👑 Status',
+                        value: '**MAXIMUM RANK ACHIEVED**',
+                        inline: false
+                    },
+                    {
+                        name: '🏆 Achievement',
+                        value: `${targetUser.username} is at the highest rank in ${unit}!`,
+                        inline: false
+                    }
+                );
+            } else {
+                // Not enough points
+                embed.addFields(
+                    {
+                        name: '⏳ Status',
+                        value: '**NOT YET ELIGIBLE**',
+                        inline: false
+                    },
+                    {
+                        name: '⬆️ Next Rank',
+                        value: RankSystem.formatRank({ 
+                            rankLevel: eligibility.nextRank.level, 
+                            rankName: eligibility.nextRank.name,
+                            unit 
+                        }),
+                        inline: true
+                    },
+                    {
+                        name: '📊 Progress',
                         value: RankSystem.createRankProgressBar(user),
                         inline: false
-                    });
-                } else {
-                    embed.addFields({
-                        name: '👑 Executive Rank',
-                        value: 'Hand-picked only - no point requirements',
-                        inline: false
-                    });
-                }
-            } else {
-                embed.addFields({
-                    name: '👑 Maximum Rank',
-                    value: 'User is already at the highest rank',
-                    inline: true
-                });
+                    },
+                    {
+                        name: '📈 Points Needed',
+                        value: `${eligibility.requirements.pointsRemaining} more rank points required`,
+                        inline: true
+                    }
+                );
             }
-
-            // Eligibility status
-            embed.addFields({
-                name: '✅ Promotion Status',
-                value: eligibility.eligible ? 
-                    '**ELIGIBLE** - Ready for promotion!' : 
-                    `**NOT ELIGIBLE** - ${eligibility.reason}`,
-                inline: false
-            });
-
-            // HR Actions
-            if (eligibility.eligible) {
-                embed.addFields({
-                    name: '🔧 HR Actions',
-                    value: `\`/promote-operator approve user:${user.username}\`\n\`/promote-operator deny user:${user.username} reason:[reason]\``,
-                    inline: false
-                });
-            } else if (lockStatus.daysRemaining) {
-                embed.addFields({
-                    name: '🔧 HR Actions',
-                    value: `\`/promote-operator bypass-lock user:${user.username} reason:[reason]\` - Remove rank lock\n\`/promote-operator force user:${user.username} rank:[rank] reason:[reason]\` - Force promote (HR+)`,
-                    inline: false
-                });
-            }
-
-            embed.setFooter({ text: `Reviewed by ${interaction.user.username}` })
-                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed], ephemeral: true });
 
         } catch (error) {
             console.error('❌ Review promotion error:', error);
-            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to review promotion status.');
+            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to review promotion eligibility.');
             await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
     },
 
+    // Approve a promotion
     async approvePromotion(interaction) {
         const targetUser = interaction.options.getUser('user');
         const reason = interaction.options.getString('reason') || 'Standard promotion';
-        
+
         try {
             const user = await SWATUser.findOne({ discordId: targetUser.id });
+
             if (!user) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} is not in the database.`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
+            // Check eligibility
             const eligibility = RankSystem.checkPromotionEligibility(user);
             
-            if (!eligibility.eligible) {
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('#ff0000')
-                    .setTitle('❌ Promotion Not Approved')
-                    .setDescription(`${user.username} is not eligible for promotion.`)
-                    .addFields({
-                        name: '❌ Reason',
-                        value: eligibility.reason,
-                        inline: false
-                    },
-                    {
-                        name: '💡 Options',
-                        value: `• Use \`review\` to see detailed requirements\n• Use \`force\` to override requirements (HR+)\n• Use \`bypass-lock\` to remove rank lock`,
-                        inline: false
-                    });
-                
+            // Allow promotion if:
+            // 1. Fully eligible (not locked, has points)
+            // 2. Rank locked BUT has enough points (HR can override lock)
+            const hasEnoughPoints = eligibility.requirements && eligibility.requirements.met;
+            const canPromote = eligibility.eligible || (eligibility.rankLocked && hasEnoughPoints);
+
+            if (!canPromote) {
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} is not eligible for promotion.\n\n**Reason:** ${eligibility.reason}`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
+            
+            // If user is rank-locked, clear the lock during promotion
+            if (eligibility.rankLocked) {
+                console.log(`🔓 AUTO-BYPASS: Clearing rank lock for ${user.username} during HR-approved promotion`);
+                user.rankLockUntil = null;
+                user.rankLockNotified = false;
+            }
+
+            await interaction.deferReply({ ephemeral: true });
 
             // Process the promotion
             const result = await PromotionChecker.processPromotion(user, interaction.user, 'standard', reason);
-            
+
             if (!result.success) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`Failed to process promotion: ${result.error}`);
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`Promotion failed: ${result.error}`);
+                return await interaction.editReply({ embeds: [errorEmbed] });
             }
 
-            // Create success embed
+            // Success!
+            const unit = user.unit || 'SWAT';
+            const divisionEmoji = unit === 'CMU' ? '🏥' : '🛡️';
+
             const successEmbed = new EmbedBuilder()
                 .setColor('#00ff00')
                 .setTitle('🎉 Promotion Approved!')
-                .setDescription(`**${user.username}** has been successfully promoted!`)
                 .setThumbnail(targetUser.displayAvatarURL())
                 .addFields(
-                    { 
-                        name: '📈 Promotion', 
-                        value: `${RankSystem.getRankEmoji(result.oldRank.level)} ${result.oldRank.name} → ${RankSystem.getRankEmoji(result.newRank.level)} ${result.newRank.name}`, 
-                        inline: false 
+                    {
+                        name: '👤 Operator',
+                        value: targetUser.username,
+                        inline: true
                     },
-                    { 
-                        name: '👤 Approved By', 
-                        value: interaction.user.username, 
-                        inline: true 
+                    {
+                        name: '🏢 Unit',
+                        value: `${divisionEmoji} ${unit}`,
+                        inline: true
                     },
-                    { 
-                        name: '📅 Date', 
-                        value: new Date().toLocaleDateString(), 
-                        inline: true 
+                    {
+                        name: '⬆️ Promotion',
+                        value: `${result.oldRank.name} → **${result.newRank.name}**`,
+                        inline: false
                     },
-                    { 
-                        name: '⭐ Points at Promotion', 
-                        value: `Rank: ${result.promotionRecord.rankPointsAtPromotion} | All-Time: ${result.promotionRecord.allTimePointsAtPromotion}`, 
-                        inline: true 
-                    },
-                    { 
-                        name: '📝 Reason', 
-                        value: reason, 
-                        inline: false 
+                    {
+                        name: '📋 Reason',
+                        value: reason,
+                        inline: false
                     }
                 );
 
-            // Add rank lock information
             if (result.lockResult.locked) {
                 successEmbed.addFields({
                     name: '🔒 Rank Lock Applied',
-                    value: `${result.lockResult.lockDays} days until next promotion eligibility`,
+                    value: `${result.lockResult.lockDays} days (until <t:${Math.floor(result.lockResult.lockUntil.getTime() / 1000)}:R>)`,
+                    inline: false
+                });
+            }
+            
+            // Note if previous lock was bypassed
+            if (eligibility.rankLocked) {
+                successEmbed.addFields({
+                    name: '🔓 Previous Lock Bypassed',
+                    value: 'User was rank-locked but had sufficient points for promotion',
                     inline: false
                 });
             }
 
-            successEmbed.setFooter({ text: 'Promotion logged in audit trail' })
-                        .setTimestamp();
+            successEmbed.setFooter({ text: `Approved by ${interaction.user.username}` });
+            successEmbed.setTimestamp();
 
-            await interaction.reply({ embeds: [successEmbed] });
-
-            // Send notification to user
-            try {
-                const userNotification = new EmbedBuilder()
-                    .setColor('#00ff00')
-                    .setTitle('🎉 Congratulations on Your Promotion!')
-                    .setDescription(`You have been promoted to **${RankSystem.formatRank(user)}**!`)
-                    .addFields(
-                        { 
-                            name: '🎖️ New Rank', 
-                            value: RankSystem.formatRank(user), 
-                            inline: true 
-                        },
-                        { 
-                            name: '👤 Approved By', 
-                            value: interaction.user.username, 
-                            inline: true 
-                        }
-                    );
-
-                if (result.lockResult.locked) {
-                    userNotification.addFields({
-                        name: '🔒 Rank Lock',
-                        value: `You are rank locked for ${result.lockResult.lockDays} days. Keep earning points toward your next promotion!`,
-                        inline: false
-                    });
-                }
-
-                await targetUser.send({ embeds: [userNotification] });
-            } catch (dmError) {
-                console.log('📱 Could not DM promotion notification to user (DMs disabled)');
-            }
-
-            console.log(`🎖️ PROMOTION APPROVED: ${user.username} promoted to ${result.newRank.name} by ${interaction.user.username}`);
+            await interaction.editReply({ embeds: [successEmbed] });
 
         } catch (error) {
             console.error('❌ Approve promotion error:', error);
             const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to approve promotion.');
-            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-        }
-    },
-
-    async denyPromotion(interaction) {
-        const targetUser = interaction.options.getUser('user');
-        const reason = interaction.options.getString('reason');
-        
-        try {
-            const user = await SWATUser.findOne({ discordId: targetUser.id });
-            if (!user) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+            
+            if (interaction.deferred) {
+                await interaction.editReply({ embeds: [errorEmbed] });
+            } else {
+                await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
-
-            // Mark user as not eligible (reset eligibility flag)
-            user.promotionEligible = false;
-            await user.save();
-
-            // Create audit log
-            const auditLog = new EventLog({
-                userId: targetUser.id,
-                username: user.username,
-                eventType: 'promotion_denied',
-                description: `PROMOTION DENIED by HR - Reason: ${reason}`,
-                pointsAwarded: 0,
-                boostedPoints: false,
-                screenshotUrl: 'HR_PROMOTION_DENIAL',
-                hrAction: {
-                    hrUser: interaction.user.id,
-                    hrUsername: interaction.user.username,
-                    action: 'deny_promotion',
-                    reason: reason,
-                    currentRank: user.rankName
-                }
-            });
-
-            await auditLog.save();
-
-            // Create response embed
-            const denialEmbed = new EmbedBuilder()
-                .setColor('#ff6600')
-                .setTitle('❌ Promotion Denied')
-                .setDescription(`Promotion denied for **${user.username}**`)
-                .addFields(
-                    { 
-                        name: '👤 User', 
-                        value: user.username,
-                        inline: true 
-                    },
-                    { 
-                        name: '🎖️ Current Rank', 
-                        value: RankSystem.formatRank(user), 
-                        inline: true 
-                    },
-                    { 
-                        name: '👤 Denied By', 
-                        value: interaction.user.username, 
-                        inline: true 
-                    },
-                    { 
-                        name: '📝 Reason', 
-                        value: reason, 
-                        inline: false 
-                    },
-                    { 
-                        name: 'ℹ️ Note', 
-                        value: 'User can be reviewed again when they meet requirements and reapply.', 
-                        inline: false 
-                    }
-                )
-                .setFooter({ text: 'Denial logged in audit trail' })
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [denialEmbed], ephemeral: true });
-
-            console.log(`❌ PROMOTION DENIED: ${user.username} by ${interaction.user.username} - Reason: ${reason}`);
-
-        } catch (error) {
-            console.error('❌ Deny promotion error:', error);
-            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to deny promotion.');
-            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
     },
 
-    async listEligibleUsers(interaction) {
+    // List all eligible users
+    async listEligible(interaction) {
         try {
             await interaction.deferReply({ ephemeral: true });
-    
-            console.log('🔍 DEBUG: Starting listEligibleUsers function');
-            
+
             const report = await PromotionChecker.getEligibilityReport();
-            
-            console.log('📊 DEBUG: Eligibility report:', {
-                reportExists: !!report,
-                totalEligible: report?.totalEligible || 0,
-                usersArrayLength: report?.eligibleUsers?.length || 0
-            });
-            
-            if (!report || report.totalEligible === 0) {
-                console.log('⚠️ DEBUG: No eligible users found');
-                
+
+            if (report.totalEligible === 0) {
                 const embed = new EmbedBuilder()
                     .setColor('#ffaa00')
-                    .setTitle('📋 Promotion Eligible Users')
-                    .setDescription('No users are currently eligible for promotion.')
-                    .addFields({
-                        name: '💡 Tip',
-                        value: 'Users become eligible when they meet rank point requirements and are not rank locked.',
-                        inline: false
-                    })
-                    .addFields({
-                        name: '🔧 Debug Info',
-                        value: `Report exists: ${!!report}\nTotal eligible: ${report?.totalEligible || 0}`,
-                        inline: false
-                    });
-    
+                    .setTitle('📋 Promotion Eligibility Report')
+                    .setDescription('No operators are currently eligible for promotion.')
+                    .setTimestamp();
+
                 return await interaction.editReply({ embeds: [embed] });
             }
-    
+
             const embed = new EmbedBuilder()
                 .setColor('#00ff00')
-                .setTitle('📋 Users Eligible for Promotion')
-                .setDescription(`${report.totalEligible} users are ready for promotion`)
+                .setTitle('📋 Promotion Eligibility Report')
+                .setDescription(`**${report.totalEligible}** operators eligible for promotion`)
                 .setTimestamp();
-    
-            // Enhanced user list generation with comprehensive error handling
-            if (report.eligibleUsers && report.eligibleUsers.length > 0) {
-                console.log('✅ DEBUG: Processing eligible users:', report.eligibleUsers.map(u => u.username));
-                
-                // Show up to 10 eligible users with robust error handling
-                const userListArray = [];
-                
-                for (let i = 0; i < Math.min(10, report.eligibleUsers.length); i++) {
-                    const user = report.eligibleUsers[i];
-                    
-                    try {
-                        // Validate user object
-                        if (!user || !user.username) {
-                            console.error(`❌ DEBUG: Invalid user object at index ${i}:`, user);
-                            userListArray.push(`• **[Invalid User ${i}]**: Missing user data`);
-                            continue;
-                        }
-                        
-                        // Validate rank data
-                        if (!user.currentRank || !user.nextRank) {
-                            console.error(`❌ DEBUG: Missing rank data for ${user.username}:`, {
-                                currentRank: user.currentRank,
-                                nextRank: user.nextRank
-                            });
-                            userListArray.push(`• **${user.username}**: Missing rank data - contact admin`);
-                            continue;
-                        }
-                        
-                        // Try to get rank objects
-                        const currentRank = RankSystem.getRankByName(user.currentRank);
-                        const nextRank = RankSystem.getRankByName(user.nextRank);
-                        
-                        if (!currentRank || !nextRank) {
-                            console.error(`❌ DEBUG: Invalid rank names for ${user.username}:`, {
-                                currentRankName: user.currentRank,
-                                nextRankName: user.nextRank,
-                                currentRankFound: !!currentRank,
-                                nextRankFound: !!nextRank
-                            });
-                            
-                            // Show basic info without emojis
-                            userListArray.push(`• **${user.username}**: ${user.currentRank} → ${user.nextRank}\n  └ Points: ${user.rankPoints || 0} | All-time: ${user.allTimePoints || 0}`);
-                            continue;
-                        }
-                        
-                        // Get emojis safely
-                        const currentRankEmoji = RankSystem.getRankEmoji(currentRank.level) || '';
-                        const nextRankEmoji = RankSystem.getRankEmoji(nextRank.level) || '';
-                        
-                        // Create user line with full formatting
-                        const userLine = `• **${user.username}**: ${currentRankEmoji} ${user.currentRank} → ${nextRankEmoji} ${user.nextRank}\n  └ Points: ${user.rankPoints || 0} | All-time: ${user.allTimePoints || 0}`;
-                        userListArray.push(userLine);
-                        
-                        console.log(`✅ DEBUG: Successfully processed ${user.username}`);
-                        
-                    } catch (userError) {
-                        console.error(`❌ DEBUG: Error processing user ${user?.username || 'unknown'}:`, userError);
-                        userListArray.push(`• **${user?.username || 'Unknown User'}**: Error processing data - ${userError.message}`);
-                    }
-                }
-                
-                // Join all user lines
-                const userListText = userListArray.join('\n\n');
-                
-                if (userListText) {
-                    embed.addFields({
-                        name: '🎖️ Eligible Users',
-                        value: userListText,
-                        inline: false
-                    });
-                    console.log('✅ DEBUG: User list added to embed successfully');
-                } else {
-                    console.error('❌ DEBUG: Generated user list is empty');
-                    embed.addFields({
-                        name: '❌ Display Error',
-                        value: 'Found eligible users but failed to format them properly. Check logs.',
-                        inline: false
-                    });
-                }
-                
-            } else {
-                // Fallback: Manual database check if report shows users but array is empty
-                console.log('⚠️ DEBUG: Report shows eligible users but array is empty, performing manual check...');
-                
-                try {
-                    const manualCheck = await SWATUser.find({ promotionEligible: true }).limit(10);
-                    console.log(`🔍 DEBUG: Manual check found ${manualCheck.length} users with promotionEligible: true`);
-                    
-                    if (manualCheck.length > 0) {
-                        const manualList = manualCheck.map((user, index) => {
-                            try {
-                                const formattedRank = RankSystem.formatRank(user);
-                                return `• **${user.username}**: ${formattedRank} (${user.rankPoints || 0} pts)`;
-                            } catch (formatError) {
-                                console.error(`❌ DEBUG: Error formatting user ${user.username}:`, formatError);
-                                return `• **${user.username}**: Rank formatting error (${user.rankPoints || 0} pts)`;
-                            }
-                        }).join('\n');
-                        
-                        embed.addFields({
-                            name: '🎖️ Eligible Users (Manual Check)',
-                            value: manualList,
-                            inline: false
-                        });
-                        
-                        embed.addFields({
-                            name: '⚠️ Note',
-                            value: 'Using fallback method - there may be an issue with the eligibility report system.',
-                            inline: false
-                        });
-                    } else {
-                        embed.addFields({
-                            name: '❌ No Users Found',
-                            value: 'Both automatic and manual checks found no eligible users. This may indicate a database issue.',
-                            inline: false
-                        });
-                    }
-                } catch (manualError) {
-                    console.error('❌ DEBUG: Manual check failed:', manualError);
-                    embed.addFields({
-                        name: '❌ System Error',
-                        value: 'Failed to retrieve eligible users. Please contact an administrator.',
-                        inline: false
-                    });
-                }
-            }
-    
-            // Show total count if more than 10
-            if (report.totalEligible > 10) {
+
+            // Group by target rank
+            for (const [rankName, count] of Object.entries(report.byRank)) {
+                const usersForRank = report.eligibleUsers.filter(u => u.nextRank === rankName);
+                const userList = usersForRank.map(u => {
+                    const divisionEmoji = u.unit === 'CMU' ? '🏥' : '🛡️';
+                    const lockIndicator = u.isRankLocked ? ' 🔒' : ' ✅';
+                    return `${divisionEmoji} **${u.username}**${lockIndicator} (${u.rankPoints} pts)`;
+                }).join('\n');
+
                 embed.addFields({
-                    name: '📊 Total',
-                    value: `Showing up to 10 of ${report.totalEligible} eligible users`,
+                    name: `⬆️ Ready for ${rankName} (${count})`,
+                    value: userList || 'None',
                     inline: false
                 });
             }
-    
-            // Show breakdown by target rank if available
-            if (report.byRank && Object.keys(report.byRank).length > 0) {
-                const rankBreakdown = Object.entries(report.byRank)
-                    .map(([rank, count]) => `• ${rank}: ${count} user${count > 1 ? 's' : ''}`)
-                    .join('\n');
-                
-                embed.addFields({
-                    name: '📊 By Target Rank',
-                    value: rankBreakdown,
-                    inline: false
-                });
-            }
-    
-            // 🔧 UPDATED HR action commands to reflect new force promotion permissions
-            embed.addFields({
-                name: '🔧 HR Actions',
-                value: '• `/promote-operator review user:[name]` - Review specific user\n• `/promote-operator approve user:[name]` - Approve promotion\n• `/promote-operator deny user:[name] reason:[reason]` - Deny promotion\n• `/promote-operator force user:[name] rank:[rank] reason:[reason]` - Force promote (HR+)',
-                inline: false
-            });
-    
+
+            embed.setFooter({ text: 'Use /promote-operator approve to process promotions | 🔒 = Rank Locked, ✅ = Ready Now' });
+
             await interaction.editReply({ embeds: [embed] });
-            console.log('✅ DEBUG: listEligibleUsers completed successfully');
-    
+
         } catch (error) {
-            console.error('❌ DEBUG: List eligible users error:', error);
-            
-            // Create detailed error embed for debugging
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#ff0000')
-                .setTitle('❌ Error: Failed to retrieve eligible users')
-                .setDescription('An error occurred while fetching promotion-eligible users.')
-                .addFields(
-                    {
-                        name: '🐛 Error Details',
-                        value: `\`\`\`${error.message}\`\`\``,
-                        inline: false
-                    },
-                    {
-                        name: '🔧 Troubleshooting',
-                        value: '• Check bot logs for detailed error information\n• Verify database connection\n• Try again in a few moments\n• Contact administrator if issue persists',
-                        inline: false
-                    }
-                )
-                .setTimestamp();
-                
+            console.error('❌ List eligible error:', error);
+            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to retrieve eligibility report.');
             await interaction.editReply({ embeds: [errorEmbed] });
         }
     },
 
-    // 🔧 ISSUE #5 MAIN FIX: Force promotion now available to HR+ and properly applies rank locks
-    async forcePromote(interaction) {
+    // Force promotion with dropdown menu
+    async forcePromotion(interaction) {
         const targetUser = interaction.options.getUser('user');
-        const targetRankName = interaction.options.getString('rank');
         const reason = interaction.options.getString('reason');
-        
+        const forceUnit = interaction.options.getString('unit'); // Optional unit override
+
         try {
-            // Double-check force promotion permission (redundant but safe)
-            if (!PermissionChecker.canForcePromotions(interaction.member)) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed('🚫 You do not have permission to use force promotions!');
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-            }
-
             const user = await SWATUser.findOne({ discordId: targetUser.id });
+
             if (!user) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} is not in the database.`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            const targetRank = RankSystem.getRankByName(targetRankName);
-            const currentRank = RankSystem.getRankByLevel(user.rankLevel);
-            
-            if (!targetRank) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed('Invalid rank specified.');
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-            }
+            // Use forced division if provided, otherwise use user's current division
+            const unit = forceUnit || user.unit || 'SWAT';
+            const ranks = RankSystem.getAllRanks(unit);
 
-            if (targetRank.level === user.rankLevel) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed('User is already at that rank.');
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-            }
-
-            // Apply force promotion with proper rank lock
-            const oldRank = currentRank;
-            user.rankName = targetRank.name;
-            user.rankLevel = targetRank.level;
-            user.rankPoints = 0; // Reset rank points
-            user.promotionEligible = false;
-            
-            // Apply proper rank lock instead of setting to null
-            const lockResult = RankSystem.applyRankLock(user, targetRank.level);
-            console.log(`🔧 Force promotion lock result:`, lockResult);
-            
-            if (lockResult.locked) {
-                user.rankLockUntil = lockResult.lockUntil;
-                user.rankLockNotified = false;
-                console.log(`🔒 Applied ${lockResult.lockDays} day rank lock until ${lockResult.lockUntil}`);
-            } else {
-                // Only set to null if the rank truly has no lock (Executive+ ranks)
-                user.rankLockUntil = null;
-                user.rankLockNotified = false;
-                console.log(`🔓 No rank lock applied (Executive+ rank or Probationary)`);
-            }
-
-            // Add to promotion history
-            user.promotionHistory.push({
-                fromRank: {
-                    name: oldRank.name,
-                    level: oldRank.level
-                },
-                toRank: {
-                    name: targetRank.name,
-                    level: targetRank.level
-                },
-                promotedAt: new Date(),
-                promotedBy: {
-                    hrUserId: interaction.user.id,
-                    hrUsername: interaction.user.username
-                },
-                promotionType: 'force',
-                reason: `FORCE PROMOTION (HR+): ${reason}`, // 🔧 Updated reason to reflect HR+ access
-                rankPointsAtPromotion: user.rankPoints,
-                allTimePointsAtPromotion: user.allTimePoints,
-                rankLockApplied: lockResult.locked ? {
-                    days: lockResult.lockDays,
-                    until: lockResult.lockUntil
-                } : null
-            });
-
-            await user.save();
-
-            // Create audit log
-            const auditLog = new EventLog({
-                userId: targetUser.id,
-                username: user.username,
-                eventType: 'force_promotion',
-                description: `FORCE PROMOTED (HR+): ${oldRank.name} → ${targetRank.name} - ${reason}`, // 🔧 Updated description
-                pointsAwarded: 0,
-                boostedPoints: false,
-                screenshotUrl: 'HR_FORCE_PROMOTION',
-                hrAction: {
-                    hrUser: interaction.user.id,
-                    hrUsername: interaction.user.username,
-                    action: 'force_promotion_hr_plus', // 🔧 Updated action type
-                    reason: reason,
-                    oldRank: oldRank.name,
-                    newRank: targetRank.name,
-                    rankLockApplied: lockResult.locked ? lockResult.lockDays : 0,
-                    rankLockUntil: lockResult.locked ? lockResult.lockUntil : null,
-                    performedBy: 'HR_PLUS' // 🔧 Track that this was done by HR+ not Commander+
-                }
-            });
-
-            await auditLog.save();
-
-            // Create response embed
-            const successEmbed = new EmbedBuilder()
-                .setColor('#ff6600')
-                .setTitle('⚡ Force Promotion Completed (HR+)') // 🔧 Updated title
-                .setDescription(`**${user.username}** has been force promoted by HR!`)
-                .setThumbnail(targetUser.displayAvatarURL())
-                .addFields(
-                    { 
-                        name: '🚀 Force Promotion', 
-                        value: `${RankSystem.getRankEmoji(oldRank.level)} ${oldRank.name} → ${RankSystem.getRankEmoji(targetRank.level)} ${targetRank.name}`, 
-                        inline: false 
-                    },
-                    { 
-                        name: '👤 Force Promoted By', 
-                        value: `${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)})`, // 🔧 Show role
-                        inline: true 
-                    },
-                    { 
-                        name: '📅 Date', 
-                        value: new Date().toLocaleDateString(), 
-                        inline: true 
-                    },
-                    { 
-                        name: '⭐ Points at Promotion', 
-                        value: `All-Time: ${user.allTimePoints}`, 
-                        inline: true 
-                    },
-                    { 
-                        name: '📝 Reason', 
-                        value: reason, 
-                        inline: false 
-                    },
-                    { 
-                        name: '✅ Permission Level', 
-                        value: '**HR+** force promotion (updated from Commander+ only)', // 🔧 Highlight the change
-                        inline: false 
-                    }
+            // Create dropdown menu with ranks for their unit
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId('rank_select')
+                .setPlaceholder(`Select rank for ${unit} unit`)
+                .addOptions(
+                    ranks.map(rank => ({
+                        label: rank.name,
+                        value: rank.name,
+                        description: `Level ${rank.level} • ${rank.pointsRequired} pts required`
+                    }))
                 );
 
-            // Show rank lock status in force promotion response
-            if (lockResult.locked) {
-                successEmbed.addFields({
-                    name: '🔒 Rank Lock Applied',
-                    value: `${lockResult.lockDays} days until next promotion eligibility`,
-                    inline: false
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+
+            const divisionEmoji = unit === 'CMU' ? '🏥' : '🛡️';
+
+            const embed = new EmbedBuilder()
+                .setColor('#0099ff')
+                .setTitle(`${divisionEmoji} Force Promotion: Select Rank`)
+                .setDescription(`Select the target rank for **${targetUser.username}**\n${forceUnit ? `⚠️ Changing unit to **${unit}**` : `Current unit: **${unit}**`}`)
+                .addFields(
+                    {
+                        name: '👤 Current Rank',
+                        value: RankSystem.formatRank(user),
+                        inline: true
+                    },
+                    {
+                        name: '📋 Reason',
+                        value: reason,
+                        inline: true
+                    }
+                )
+                .setFooter({ text: 'This will bypass all requirements and locks' });
+
+            const response = await interaction.reply({
+                embeds: [embed],
+                components: [row],
+                ephemeral: true,
+                fetchReply: true
+            });
+
+            // Wait for selection
+            const collector = response.createMessageComponentCollector({
+                componentType: ComponentType.StringSelect,
+                time: 60000
+            });
+
+            collector.on('collect', async i => {
+                if (i.user.id !== interaction.user.id) {
+                    return await i.reply({ content: 'Only the command user can select a rank.', ephemeral: true });
+                }
+
+                const selectedRankName = i.values[0];
+                const selectedRank = ranks.find(r => r.name === selectedRankName);
+
+                await i.deferUpdate();
+
+                // Force promote to selected rank
+                const oldRank = RankSystem.getRankByLevel(user.rankLevel, user.unit || 'SWAT');
+                const oldUnit = user.unit || 'SWAT';
+
+                user.rankLevel = selectedRank.level;
+                user.rankName = selectedRank.name;
+                user.unit = unit; // Update unit if changed
+                user.rankPoints = 0;
+                user.promotionEligible = false;
+
+                // Apply rank lock if needed
+                const lockResult = RankSystem.applyRankLock(user, selectedRank.level);
+                if (lockResult.locked) {
+                    user.rankLockUntil = lockResult.lockUntil;
+                    user.rankLockNotified = false;
+                }
+
+                // Add to promotion history
+                user.promotionHistory.push({
+                    fromRank: { name: oldRank.name, level: oldRank.level },
+                    toRank: { name: selectedRank.name, level: selectedRank.level },
+                    promotedAt: new Date(),
+                    promotedBy: {
+                        hrUserId: interaction.user.id,
+                        hrUsername: interaction.user.username
+                    },
+                    promotionType: 'force',
+                    reason: reason,
+                    rankPointsAtPromotion: user.rankPoints,
+                    allTimePointsAtPromotion: user.allTimePoints,
+                    rankLockApplied: lockResult.locked ? {
+                        days: lockResult.lockDays,
+                        until: lockResult.lockUntil
+                    } : undefined
                 });
-            } else {
-                successEmbed.addFields({
-                    name: '🔓 Rank Lock Status',
-                    value: 'No rank lock (Executive+ rank)',
-                    inline: false
+
+                await user.save();
+
+                // Create audit log
+                const auditLog = new EventLog({
+                    userId: user.discordId,
+                    username: user.username,
+                    eventType: 'promotion',
+                    description: `FORCE PROMOTED: ${oldRank.name} → ${selectedRank.name}`,
+                    pointsAwarded: 0,
+                    boostedPoints: false,
+                    screenshotUrl: 'HR_FORCE_PROMOTION',
+                    hrAction: {
+                        hrUser: interaction.user.id,
+                        hrUsername: interaction.user.username,
+                        action: 'force_promotion',
+                        reason: reason
+                    }
                 });
-            }
 
-            successEmbed.setFooter({ text: 'Force promotion logged in audit trail' })
-                        .setTimestamp();
+                await auditLog.save();
 
-            await interaction.reply({ embeds: [successEmbed] });
+                // Success embed
+                const successEmbed = new EmbedBuilder()
+                    .setColor('#00ff00')
+                    .setTitle('⚡ Force Promotion Complete')
+                    .setThumbnail(targetUser.displayAvatarURL())
+                    .addFields(
+                        {
+                            name: '👤 Operator',
+                            value: targetUser.username,
+                            inline: true
+                        },
+                        {
+                            name: '🏢 Unit',
+                            value: oldUnit !== unit ? 
+                                `${RankSystem.getUnitEmoji(oldUnit)} ${oldUnit} → ${divisionEmoji} ${unit}` :
+                                `${divisionEmoji} ${unit}`,
+                            inline: true
+                        },
+                        {
+                            name: '⬆️ Promotion',
+                            value: `${oldRank.name} → **${selectedRank.name}**`,
+                            inline: false
+                        },
+                        {
+                            name: '📋 Reason',
+                            value: reason,
+                            inline: false
+                        }
+                    );
 
-            console.log(`🚀 HR+ FORCE PROMOTION: ${user.username} force promoted from ${oldRank.name} to ${targetRank.name} by ${interaction.user.username} (${PermissionChecker.getUserHighestRoleName(interaction.member)}) - Lock: ${lockResult.locked ? `${lockResult.lockDays} days` : 'none'}`);
+                if (lockResult.locked) {
+                    successEmbed.addFields({
+                        name: '🔒 Rank Lock Applied',
+                        value: `${lockResult.lockDays} days`,
+                        inline: true
+                    });
+                }
+
+                successEmbed.setFooter({ text: `Force promoted by ${interaction.user.username}` });
+                successEmbed.setTimestamp();
+
+                await i.editReply({ embeds: [successEmbed], components: [] });
+
+                console.log(`⚡ FORCE PROMOTION: ${targetUser.username} promoted from ${oldRank.name} to ${selectedRank.name} by ${interaction.user.username}`);
+            });
+
+            collector.on('end', collected => {
+                if (collected.size === 0) {
+                    interaction.editReply({ content: 'Rank selection timed out.', components: [] }).catch(() => {});
+                }
+            });
 
         } catch (error) {
             console.error('❌ Force promotion error:', error);
@@ -911,36 +605,38 @@ module.exports = {
         }
     },
 
-    async bypassRankLock(interaction) {
+    // Bypass rank lock
+    async bypassLock(interaction) {
         const targetUser = interaction.options.getUser('user');
         const reason = interaction.options.getString('reason');
-        
+
         try {
             const user = await SWATUser.findOne({ discordId: targetUser.id });
+
             if (!user) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} is not in the database.`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
 
-            const lockStatus = RankSystem.checkRankLockExpiry(user);
-            
-            if (lockStatus.expired || !user.rankLockUntil) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${user.username} is not currently rank locked.`);
+            if (!user.rankLockUntil) {
+                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} does not have a rank lock.`);
                 return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
             }
+
+            const lockExpiry = new Date(user.rankLockUntil);
+            const unit = user.unit || 'SWAT';
 
             // Remove rank lock
-            const daysRemaining = lockStatus.daysRemaining;
             user.rankLockUntil = null;
             user.rankLockNotified = false;
             await user.save();
 
             // Create audit log
             const auditLog = new EventLog({
-                userId: targetUser.id,
+                userId: user.discordId,
                 username: user.username,
                 eventType: 'rank_lock_bypass',
-                description: `RANK LOCK BYPASSED by HR - ${daysRemaining} days remaining - Reason: ${reason}`,
+                description: `Rank lock bypassed by HR`,
                 pointsAwarded: 0,
                 boostedPoints: false,
                 screenshotUrl: 'HR_LOCK_BYPASS',
@@ -948,79 +644,47 @@ module.exports = {
                     hrUser: interaction.user.id,
                     hrUsername: interaction.user.username,
                     action: 'bypass_rank_lock',
-                    reason: reason,
-                    daysRemaining: daysRemaining
+                    reason: reason
                 }
             });
 
             await auditLog.save();
 
             const successEmbed = new EmbedBuilder()
-                .setColor('#ff6600')
-                .setTitle('🔓 Rank Lock Bypassed')
-                .setDescription(`Rank lock removed for **${user.username}**`)
+                .setColor('#00ff00')
+                .setTitle('🔓 Rank Lock Removed')
                 .addFields(
-                    { name: '👤 User', value: user.username, inline: true },
-                    { name: '🎖️ Current Rank', value: RankSystem.formatRank(user), inline: true },
-                    { name: '⏰ Days Bypassed', value: `${daysRemaining} days`, inline: true },
-                    { name: '👤 Bypassed By', value: interaction.user.username, inline: true },
-                    { name: '📅 Date', value: new Date().toLocaleDateString(), inline: true },
-                    { name: '📝 Reason', value: reason, inline: false },
-                    { name: '✅ Status', value: 'User is now available for promotion review.', inline: false }
+                    {
+                        name: '👤 Operator',
+                        value: targetUser.username,
+                        inline: true
+                    },
+                    {
+                        name: '🏢 Unit',
+                        value: unit === 'CMU' ? '🏥 CMU' : '🛡️ SWAT',
+                        inline: true
+                    },
+                    {
+                        name: '⏰ Previous Lock',
+                        value: `Until <t:${Math.floor(lockExpiry.getTime() / 1000)}:F>`,
+                        inline: false
+                    },
+                    {
+                        name: '📋 Reason',
+                        value: reason,
+                        inline: false
+                    }
                 )
-                .setFooter({ text: 'Lock bypass logged in audit trail' })
+                .setFooter({ text: `Lock bypassed by ${interaction.user.username}` })
                 .setTimestamp();
 
             await interaction.reply({ embeds: [successEmbed], ephemeral: true });
 
+            console.log(`🔓 Rank lock bypassed for ${targetUser.username} by ${interaction.user.username}`);
+
         } catch (error) {
-            console.error('❌ Bypass rank lock error:', error);
+            console.error('❌ Bypass lock error:', error);
             const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to bypass rank lock.');
-            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-        }
-    },
-
-    async setUserRank(interaction) {
-        const targetUser = interaction.options.getUser('user');
-        const targetRankName = interaction.options.getString('rank');
-        const rankPoints = interaction.options.getInteger('rank-points') || 0;
-        
-        try {
-            const user = await SWATUser.findOne({ discordId: targetUser.id });
-            if (!user) {
-                const errorEmbed = SWATEmbeds.createErrorEmbed(`${targetUser.username} not found in database.`);
-                return await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-            }
-
-            const targetRank = RankSystem.getRankByName(targetRankName);
-            const oldRank = RankSystem.getRankByLevel(user.rankLevel);
-
-            user.rankName = targetRank.name;
-            user.rankLevel = targetRank.level;
-            user.rankPoints = rankPoints;
-            user.promotionEligible = false;
-            user.rankLockUntil = null;
-            user.rankLockNotified = false;
-
-            await user.save();
-
-            const successEmbed = new EmbedBuilder()
-                .setColor('#0099ff')
-                .setTitle('🔧 Rank Set Successfully')
-                .setDescription(`Rank updated for **${user.username}**`)
-                .addFields(
-                    { name: '👤 User', value: user.username, inline: true },
-                    { name: '📈 Rank Change', value: `${RankSystem.getRankEmoji(oldRank.level)} ${oldRank.name} → ${RankSystem.getRankEmoji(targetRank.level)} ${targetRank.name}`, inline: false },
-                    { name: '📊 Rank Points Set', value: `${rankPoints} points toward next promotion`, inline: true },
-                    { name: '👤 Set By', value: interaction.user.username, inline: true }
-                )
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [successEmbed], ephemeral: true });
-
-        } catch (error) {
-            console.error('❌ Set user rank error:', error);
-            const errorEmbed = SWATEmbeds.createErrorEmbed('Failed to set user rank.');
             await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
         }
     }

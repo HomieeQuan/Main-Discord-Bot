@@ -16,17 +16,14 @@ module.exports = {
                     { name: 'Attending SWAT Event (3pts)', value: 'attend_swat_event' },
                     { name: 'Co-Hosting/Hosting SWAT Event (4pts)', value: 'host_swat_event' },
                     { name: 'Backup Request (3pts)', value: 'backup_request' },
-                    { name: 'GHOST Protection [Good Rating 7/10+] (4pts)', value: 'ghost_protection_good' },
-                    { name: 'GHOST Protection [Bad Rating 6/10-] (2pts)', value: 'ghost_protection_bad' },
                     { name: 'TET [Private Tryout] (2pts)', value: 'tet_private' },
                     { name: 'TET [Public Tryout] (3pts)', value: 'tet_public' },
                     { name: 'SLRPD Inspection Ceremony (2pts)', value: 'slrpd_inspection' },
                     { name: 'Combat Training (2pts)', value: 'combat_training' },
                     { name: 'SWAT Inspection Ceremony (3pts)', value: 'swat_inspection' },
                     { name: 'Deployment (4pts)', value: 'gang_deployment' },
-                    // NEW: Warrant Execution events
-                    { name: 'Warrant Execution [Arrest] (10pts)', value: 'warrant_execution_arrest' },
-                    { name: 'Warrant Execution [Kill] (6pts)', value: 'warrant_execution_kill' }
+                    // NEW: Warrant Execution event (arrest only)
+                    { name: 'Warrant Execution (5pts)', value: 'warrant_execution_arrest' }
                 ))
         .addStringOption(option =>
             option.setName('description')
@@ -93,7 +90,7 @@ module.exports = {
         }
 
         // NEW: Validate Warrant Execution events (no attendees bonus, special quantity limits)
-        const isWarrantExecution = eventType === 'warrant_execution_arrest' || eventType === 'warrant_execution_kill';
+        const isWarrantExecution = eventType === 'warrant_execution_arrest';
         
         if (isWarrantExecution && attendeesPassed > 0) {
             return await interaction.reply({

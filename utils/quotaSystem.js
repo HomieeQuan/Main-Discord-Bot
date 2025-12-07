@@ -1,33 +1,24 @@
-// utils/quotaSystem.js - UPDATED with new reduced quota requirements
+// utils/quotaSystem.js - UPDATED: Dual-division quota system with new requirements
 const RankSystem = require('./rankSystem');
 
 class QuotaSystem {
-    // UPDATED: New rank-based quota structure with reduced requirements
+    // NEW: Rank-based quota structure (same for both SWAT and CMU)
     static quotaByRankLevel = {
-        // Probationary (unchanged)
-        1: 10,   // Probationary Operator: 10 points
+        // Operational Tier
+        1: 10,   // Probationary / Responder In Training: 10 points
+        2: 15,   // Junior Operator / Field Medic: 15 points
+        3: 20,   // Experienced Operator / Junior Field Medic: 20 points
+        4: 20,   // Senior Operator / Senior Field Medic: 20 points
+        5: 25,   // Specialized Operator / Specialist: 25 points
         
-        // Junior-Senior ranks (reduced from 20 to 12)
-        2: 12,   // Junior Operator: 12 points (was 20)
-        3: 12,   // Experienced Operator: 12 points (was 20)
-        4: 12,   // Senior Operator: 12 points (was 20)
+        // Supervisor Tier
+        6: 30,   // Tactical Operator / Medical Master Sergeant: 30 points
+        7: 30,   // Advanced Operator / Emergency Coordinator: 30 points
+        8: 30,   // Elite Operator / Chief Medical Officer: 30 points
         
-        // Specialized-Elite ranks (reduced from 25 to 15)
-        5: 15,   // Specialized Operator: 15 points (was 25)
-        6: 15,   // Elite Operator: 15 points (was 25)
-        
-        // Elite I-IV ranks (reduced from 30 to 18)
-        7: 18,   // Elite Operator I Class: 18 points (was 30)
-        8: 18,   // Elite Operator II Class: 18 points (was 30)
-        9: 18,   // Elite Operator III Class: 18 points (was 30)
-        10: 18,  // Elite Operator IV Class: 18 points (was 30)
-        
-        // Executive+ ranks (no quota - unchanged)
-        11: 0,   // Executive Operator: No quota
-        12: 0,   // Senior Executive Operator: No quota
-        13: 0,   // Operations Chief: No quota
-        14: 0,   // Deputy Commander: No quota
-        15: 0    // SWAT Commander: No quota
+        // HR Tier (Both have 20 point quota)
+        9: 20,   // Executive Operator / Board of Medicine: 20 POINTS
+        10: 20   // Senior Executive Operator / Medical Director: 20 POINTS
     };
 
     // Get quota for a specific rank level
@@ -44,10 +35,6 @@ class QuotaSystem {
     // Check if user has completed their quota
     static isQuotaCompleted(user) {
         const userQuota = this.getUserQuota(user);
-        
-        // Executive+ ranks have no quota requirement
-        if (userQuota === 0) return true;
-        
         return user.weeklyPoints >= userQuota;
     }
 
@@ -86,6 +73,7 @@ class QuotaSystem {
                     updatedCount++;
                     updateResults.push({
                         username: user.username,
+                        division: user.division || 'SWAT',
                         rankLevel: user.rankLevel,
                         oldQuota: result.oldQuota,
                         newQuota: result.newQuota,
@@ -109,9 +97,9 @@ class QuotaSystem {
             console.log(`   - Completion status changes: ${completionChanges}`);
             
             if (updateResults.length > 0) {
-                console.log('📊 NEW Quota changes:');
+                console.log('📊 Quota changes:');
                 updateResults.forEach(result => {
-                    console.log(`   - ${result.username}: ${result.oldQuota} → ${result.newQuota} points`);
+                    console.log(`   - [${result.division}] ${result.username}: ${result.oldQuota} → ${result.newQuota} points`);
                 });
             }
             
@@ -132,53 +120,61 @@ class QuotaSystem {
         }
     }
 
-    // Get quota statistics for all ranks
+    // Get quota statistics for all ranks and divisions
     static getQuotaStatistics() {
         const stats = {
-            byRank: {},
-            totalRanks: 15,
-            ranksWithQuota: 0,
-            ranksWithoutQuota: 0,
+            byDivision: {
+                SWAT: {},
+                CMU: {}
+            },
+            totalRanks: 20, // 10 SWAT + 10 CMU
             averageQuota: 0
         };
 
         let totalQuota = 0;
-        let ranksWithQuota = 0;
+        let rankCount = 0;
 
-        for (let level = 1; level <= 15; level++) {
-            const rank = RankSystem.getRankByLevel(level);
+        // SWAT ranks
+        for (let level = 1; level <= 10; level++) {
+            const rank = RankSystem.getRankByLevel(level, 'SWAT');
             const quota = this.getQuotaForRank(level);
             
-            stats.byRank[rank.name] = {
+            stats.byDivision.SWAT[rank.name] = {
                 level,
                 quota,
-                hasQuota: quota > 0
+                tier: rank.tier
             };
             
-            if (quota > 0) {
-                totalQuota += quota;
-                ranksWithQuota++;
-                stats.ranksWithQuota++;
-            } else {
-                stats.ranksWithoutQuota++;
-            }
+            totalQuota += quota;
+            rankCount++;
         }
 
-        stats.averageQuota = ranksWithQuota > 0 ? Math.round(totalQuota / ranksWithQuota) : 0;
+        // CMU ranks
+        for (let level = 1; level <= 10; level++) {
+            const rank = RankSystem.getRankByLevel(level, 'CMU');
+            const quota = this.getQuotaForRank(level);
+            
+            stats.byDivision.CMU[rank.name] = {
+                level,
+                quota,
+                tier: rank.tier
+            };
+            
+            totalQuota += quota;
+            rankCount++;
+        }
+
+        stats.averageQuota = rankCount > 0 ? Math.round(totalQuota / rankCount) : 0;
 
         return stats;
     }
 
     // Get human-readable quota description for a rank
-    static getQuotaDescription(rankLevel) {
+    static getQuotaDescription(rankLevel, division = 'SWAT') {
         const quota = this.getQuotaForRank(rankLevel);
-        const rank = RankSystem.getRankByLevel(rankLevel);
+        const rank = RankSystem.getRankByLevel(rankLevel, division);
         
-        if (quota === 0) {
-            return `${RankSystem.formatRank({ rankLevel, rankName: rank.name })} - No quota required (Executive+)`;
-        }
-        
-        return `${RankSystem.formatRank({ rankLevel, rankName: rank.name })} - ${quota} points required`;
+        return `${RankSystem.formatRank({ rankLevel, rankName: rank.name, division })} - ${quota} points required`;
     }
 
     // Check if a user needs quota recalculation (after rank change)
@@ -200,6 +196,7 @@ class QuotaSystem {
                     const expectedQuota = this.getUserQuota(user);
                     needingUpdate.push({
                         username: user.username,
+                        division: user.division || 'SWAT',
                         currentQuota: user.weeklyQuota,
                         expectedQuota,
                         rankLevel: user.rankLevel
@@ -220,14 +217,14 @@ class QuotaSystem {
         try {
             const SWATUser = require('../models/SWATUser');
             
-            console.log('🔄 Applying weekly quota reset with UPDATED rank-based quotas...');
+            console.log('🔄 Applying weekly quota reset with rank-based quotas...');
             
             // Update all users with current rank-based quotas
             const users = await SWATUser.find({});
             let updatedCount = 0;
             
             for (const user of users) {
-                const newQuota = this.getUserQuota(user); // Uses NEW quota requirements
+                const newQuota = this.getUserQuota(user);
                 
                 // Update quota and reset weekly stats
                 user.weeklyQuota = newQuota;
@@ -242,8 +239,8 @@ class QuotaSystem {
                 updatedCount++;
             }
             
-            console.log(`✅ Weekly quota reset complete: ${updatedCount} users updated with NEW rank-based quotas`);
-            console.log(`📊 NEW Quota structure: Probationary=10, Junior-Senior=12, Specialized-Elite=15, Elite I-IV=18, Executive+=0`);
+            console.log(`✅ Weekly quota reset complete: ${updatedCount} users updated with rank-based quotas`);
+            console.log(`📊 Quota structure: Operational=10-25pts, Supervisor=30pts, HR=25pts`);
             
             return {
                 success: true,
@@ -257,6 +254,39 @@ class QuotaSystem {
                 error: error.message
             };
         }
+    }
+
+    // NEW: Get quota breakdown by tier
+    static getQuotaByTier() {
+        return {
+            operational: {
+                levels: [1, 2, 3, 4, 5],
+                quotas: [10, 15, 20, 20, 25],
+                description: 'Entry to mid-level operators'
+            },
+            supervisor: {
+                levels: [6, 7, 8],
+                quotas: [30, 30, 30],
+                description: 'Leadership and tactical supervision'
+            },
+            hr: {
+                levels: [9, 10],
+                quotas: [25, 25],
+                description: 'Executive leadership (hand-picked)'
+            }
+        };
+    }
+
+    // NEW: Get division-specific quota info
+    static getDivisionQuotaInfo(division = 'SWAT') {
+        const ranks = RankSystem.getAllRanks(division);
+        return ranks.map(rank => ({
+            level: rank.level,
+            name: rank.name,
+            quota: this.getQuotaForRank(rank.level),
+            tier: rank.tier,
+            emoji: rank.emoji
+        }));
     }
 }
 

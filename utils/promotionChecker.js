@@ -133,7 +133,8 @@ class PromotionChecker {
     // Process a promotion (called by HR commands)
     static async processPromotion(user, hrUser, promotionType = 'standard', reason = 'Standard promotion') {
         try {
-            const oldRank = RankSystem.getRankByLevel(user.rankLevel);
+            const unit = user.unit || 'SWAT';
+            const oldRank = RankSystem.getRankByLevel(user.rankLevel, unit);
             const eligibility = RankSystem.checkPromotionEligibility(user);
             
             if (!eligibility.nextRank) {
@@ -238,7 +239,7 @@ class PromotionChecker {
             
             // Get ALL users and check eligibility in real-time (don't rely on promotionEligible field)
             const allUsers = await SWATUser.find({
-                rankLevel: { $lt: 15 } // Don't include max rank (Commander level 15)
+                rankLevel: { $lt: 10 } // Don't include max rank (level 10 for both divisions)
             });
             
             console.log(`📊 Checking ${allUsers.length} users for eligibility...`);
@@ -253,9 +254,13 @@ class PromotionChecker {
                 // Check eligibility in real-time using the same logic as review command
                 const eligibility = RankSystem.checkPromotionEligibility(user);
                 
-                console.log(`🔍 ${user.username}: eligible=${eligibility.eligible}, reason="${eligibility.reason}"`);
+                console.log(`🔍 ${user.username}: eligible=${eligibility.eligible}, locked=${eligibility.rankLocked}, reason="${eligibility.reason}"`);
                 
-                if (eligibility.eligible && eligibility.nextRank) {
+                // Include users who are eligible OR have enough points but are rank-locked
+                const hasEnoughPoints = eligibility.requirements && eligibility.requirements.met;
+                const isRankLocked = eligibility.rankLocked;
+                
+                if ((eligibility.eligible || (hasEnoughPoints && isRankLocked)) && eligibility.nextRank) {
                     report.totalEligible++;
                     
                     // Group by target rank
@@ -268,10 +273,13 @@ class PromotionChecker {
                     report.eligibleUsers.push({
                         username: user.username,
                         discordId: user.discordId,
+                        division: user.unit || 'SWAT',
                         currentRank: eligibility.currentRank.name,
                         nextRank: eligibility.nextRank.name,
                         rankPoints: user.rankPoints || 0,
                         allTimePoints: user.allTimePoints || 0,
+                        isRankLocked: isRankLocked,
+                        lockExpiry: isRankLocked ? user.rankLockUntil : null,
                         readySince: user.lastPromotionCheck || user.updatedAt
                     });
                     

@@ -7,17 +7,14 @@ class PointCalculator {
         'attend_swat_event': 3,
         'host_swat_event': 4,
         'backup_request': 3,
-        'ghost_protection_good': 4, 
-        'ghost_protection_bad': 2,
         'tet_private': 2,              
         'tet_public': 3,               
         'slrpd_inspection': 2,
         'combat_training': 2,          
         'swat_inspection': 3,
         'gang_deployment': 4,
-        // NEW: Warrant Execution events
-        'warrant_execution_arrest': 10,  // High-value target arrested alive
-        'warrant_execution_kill': 6      // High-value target killed
+        // NEW: Warrant Execution event (arrest only)
+        'warrant_execution_arrest': 5,   // High-value target arrested
     };
 
     // Human-readable names for each event type
@@ -27,17 +24,14 @@ class PointCalculator {
         'attend_swat_event': 'Attending SWAT Event',
         'host_swat_event': 'Co-Hosting/Hosting SWAT Event',
         'backup_request': 'Backup Request',
-        'ghost_protection_good': 'GHOST Protection [Good Rating]',
-        'ghost_protection_bad': 'GHOST Protection [Bad Rating]',
         'tet_private': 'TET [Private Tryout]',
         'tet_public': 'TET [Public Tryout]',
         'slrpd_inspection': 'SLRPD Inspection Ceremony',
         'combat_training': 'Combat Training',
         'swat_inspection': 'SWAT Inspection Ceremony',
         'gang_deployment': 'Gang Deployment',
-        // NEW: Warrant Execution events
-        'warrant_execution_arrest': 'Warrant Execution [Arrest]',
-        'warrant_execution_kill': 'Warrant Execution [Kill]'
+        // NEW: Warrant Execution event
+        'warrant_execution_arrest': 'Warrant Execution'
     };
 
     // Calculate base points for an event (without booster multiplier)
@@ -73,7 +67,7 @@ class PointCalculator {
 
     // NEW: Check if event type is a warrant execution
     static isWarrantExecution(eventType) {
-        return eventType === 'warrant_execution_arrest' || eventType === 'warrant_execution_kill';
+        return eventType === 'warrant_execution_arrest';
     }
 
     // Get human-readable name for an event type

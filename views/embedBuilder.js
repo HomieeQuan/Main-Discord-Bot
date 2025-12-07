@@ -25,8 +25,20 @@ class SWATEmbeds {
             // 🔧 ENHANCED: Clean rank lock status display with Discord timestamps
             const lockStatus = RankSystem.checkRankLockExpiry(user);
             
-            // Only show rank lock field if user is actually locked
-            if (!lockStatus.expired && lockStatus.daysRemaining && user.rankLockUntil) {
+            // Check if current rank is hand-picked (levels 6, 9, 10)
+            const currentRankData = RankSystem.getRankByLevel(user.rankLevel, user.unit || 'SWAT');
+            const isHandPicked = currentRankData && currentRankData.handPicked;
+            
+            // Show rank lock status
+            if (isHandPicked) {
+                // Hand-picked ranks show special message
+                embed.addFields({
+                    name: '⭐ Rank Status',
+                    value: 'Hand-picked rank - no lock',
+                    inline: true
+                });
+            } else if (!lockStatus.expired && lockStatus.daysRemaining && user.rankLockUntil) {
+                // Regular ranks show lock expiry if locked
                 const discordTimestamp = lockStatus.discordTimestamp || Math.floor(new Date(user.rankLockUntil).getTime() / 1000);
                 
                 embed.addFields({
@@ -36,9 +48,20 @@ class SWATEmbeds {
                 });
             }
 
-            // FIXED: Add rank progression bar for non-Executive ranks (MOVED TO CORRECT POSITION)
-            if (!RankSystem.isExecutiveOrHigher(user.rankLevel)) {
-                // Ensure user has all required fields with safe fallbacks
+            // Rank progression display
+            // Levels 5 & 8: Next rank is hand-picked (no progression bar)
+            // Levels 6, 9, 10: Hand-picked ranks (no progression bar)
+            // All others: Show progression bar
+            if (user.rankLevel === 5 || user.rankLevel === 8) {
+                // User is at the rank BEFORE a hand-picked rank
+                const nextRankData = RankSystem.getRankByLevel(user.rankLevel + 1, user.unit || 'SWAT');
+                embed.addFields({
+                    name: '⭐ Next Rank',
+                    value: `**${nextRankData.name}** is hand-picked by leadership.\n\nContinue performing well to be considered for promotion.`,
+                    inline: false
+                });
+            } else if (!isHandPicked && !RankSystem.isExecutiveOrHigher(user.rankLevel)) {
+                // Regular operational ranks show progression bar
                 const safeUser = {
                     rankPoints: user.rankPoints || 0,
                     rankLevel: user.rankLevel || 1,
@@ -66,19 +89,14 @@ class SWATEmbeds {
             }
 
             // Weekly quota progress (this comes AFTER rank progression)
-            if (RankSystem.isExecutiveOrHigher(user.rankLevel)) {
-                embed.addFields({
-                    name: '🎯 Weekly Quota',
-                    value: 'No quota required',
-                    inline: false
-                });
-            } else {
-                embed.addFields({
-                    name: '🎯 Weekly Quota Progress',
-                    value: ProgressBarGenerator.createQuotaProgressBar(user.weeklyPoints, user.weeklyQuota),
-                    inline: false
-                });
-            }
+            // ALL ranks including HR (Level 9-10) have quotas
+            const QuotaSystem = require('../utils/quotaSystem');
+            const correctQuota = QuotaSystem.getUserQuota(user);
+            embed.addFields({
+                name: '🎯 Weekly Quota Progress',
+                value: ProgressBarGenerator.createQuotaProgressBar(user.weeklyPoints, correctQuota),
+                inline: false
+            });
 
             // 🔧 ENHANCED: Promotion eligibility with Discord timestamps
             const eligibility = RankSystem.checkPromotionEligibility(user);
@@ -327,6 +345,9 @@ class SWATEmbeds {
 
     // Standard embed methods (keeping existing functionality)
     static createEventSubmissionEmbed(user, eventType, description, actualPoints, basePoints, isBooster, screenshot) {
+        const QuotaSystem = require('../utils/quotaSystem');
+        const correctQuota = QuotaSystem.getUserQuota(user);
+        
         const embed = new EmbedBuilder()
             .setColor(user.quotaCompleted ? '#00ff00' : '#ffa500')
             .setTitle('✅ Event Submitted Successfully!')
@@ -341,7 +362,7 @@ class SWATEmbeds {
                 },
                 { 
                     name: '📈 Weekly Progress', 
-                    value: `${user.weeklyPoints}/${user.weeklyQuota} points`, 
+                    value: `${user.weeklyPoints}/${correctQuota} points`, 
                     inline: true 
                 },
                 { 
@@ -361,7 +382,7 @@ class SWATEmbeds {
             })
             .setTimestamp();
 
-        if (user.quotaCompleted && user.weeklyPoints - actualPoints < user.weeklyQuota) {
+        if (user.quotaCompleted && user.weeklyPoints - actualPoints < correctQuota) {
             embed.setDescription(embed.data.description + '\n\n🎉 **Congratulations! You\'ve completed your weekly quota!**');
         }
 
