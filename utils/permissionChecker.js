@@ -46,12 +46,22 @@ class PermissionChecker {
         if (!member || !member.roles) return 0;
         
         let highestLevel = 0;
+        let debugRoles = []; // For debugging
+        
         member.roles.cache.forEach(role => {
             const level = ROLE_LEVELS[role.name] || 0;
             if (level > highestLevel) {
                 highestLevel = level;
             }
+            if (level > 0) {
+                debugRoles.push(`${role.name}=${level}`);
+            }
         });
+        
+        // Debug logging for troubleshooting
+        if (debugRoles.length > 0) {
+            console.log(`🔍 PERMISSION DEBUG: ${member.user?.username || 'Unknown'} - Roles: [${debugRoles.join(', ')}] - Highest Level: ${highestLevel}`);
+        }
         
         return highestLevel;
     }
@@ -89,7 +99,36 @@ class PermissionChecker {
 
     // Check if user is HR+ (Management Access)
     static isHRPlus(member) {
-        return this.getUserRoleLevel(member) >= 50;
+        if (!member || !member.roles) return false;
+        
+        const roleLevel = this.getUserRoleLevel(member);
+        
+        // Standard check - role level 50 or higher
+        if (roleLevel >= 50) {
+            return true;
+        }
+        
+        // Additional flexible check for Executive Operator role
+        // This helps catch cases where the role name might have slight variations
+        const hasExecutiveOperator = member.roles.cache.some(role => {
+            const roleName = role.name.trim();
+            return roleName === 'HR | Executive Operator' || 
+                   roleName === 'Executive Operator' ||
+                   roleName.includes('Executive Operator');
+        });
+        
+        if (hasExecutiveOperator) {
+            console.log(`✅ EXECUTIVE OPERATOR DETECTED: ${member.user?.username || 'Unknown'} has Executive Operator role`);
+            return true;
+        }
+        
+        // If we got here and don't have HR access, log the roles for debugging
+        if (!hasExecutiveOperator && roleLevel < 50) {
+            const roles = Array.from(member.roles.cache.values()).map(r => r.name).join(', ');
+            console.log(`❌ HR CHECK FAILED: ${member.user?.username || 'Unknown'} - Roles: ${roles} - Level: ${roleLevel}`);
+        }
+        
+        return false;
     }
 
     // Check if user is SWAT Operator

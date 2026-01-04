@@ -23,7 +23,12 @@ module.exports = {
                     { name: 'SWAT Inspection Ceremony (3pts)', value: 'swat_inspection' },
                     { name: 'Deployment (4pts)', value: 'gang_deployment' },
                     // NEW: Warrant Execution event (arrest only)
-                    { name: 'Warrant Execution (5pts)', value: 'warrant_execution_arrest' }
+                    { name: 'Warrant Execution (5pts)', value: 'warrant_execution_arrest' },
+                    // NEW: CMU Events
+                    { name: 'Saved Lives (1pt)', value: 'saved_lives' },
+                    { name: 'Attend CMU Event (3pts)', value: 'attend_cmu_event' },
+                    { name: 'MEST Training (3pts)', value: 'mest_training' },
+                    { name: 'Host CMU Events (4pts)', value: 'host_cmu_events' }
                 ))
         .addStringOption(option =>
             option.setName('description')

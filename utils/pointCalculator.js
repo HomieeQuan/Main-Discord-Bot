@@ -15,6 +15,11 @@ class PointCalculator {
         'gang_deployment': 4,
         // NEW: Warrant Execution event (arrest only)
         'warrant_execution_arrest': 5,   // High-value target arrested
+        // NEW: CMU Events
+        'saved_lives': 1,                // CMU: Saved lives
+        'attend_cmu_event': 3,           // CMU: Attend CMU event
+        'mest_training': 3,              // CMU: MEST training
+        'host_cmu_events': 4             // CMU: Host CMU events
     };
 
     // Human-readable names for each event type
@@ -31,7 +36,12 @@ class PointCalculator {
         'swat_inspection': 'SWAT Inspection Ceremony',
         'gang_deployment': 'Gang Deployment',
         // NEW: Warrant Execution event
-        'warrant_execution_arrest': 'Warrant Execution'
+        'warrant_execution_arrest': 'Warrant Execution',
+        // NEW: CMU Events
+        'saved_lives': 'Saved Lives',
+        'attend_cmu_event': 'Attend CMU Event',
+        'mest_training': 'MEST Training',
+        'host_cmu_events': 'Host CMU Events'
     };
 
     // Calculate base points for an event (without booster multiplier)

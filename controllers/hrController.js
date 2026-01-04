@@ -547,7 +547,7 @@ class HRController {
                     },
                     {
                         name: '🎯 Quota Structure',
-                        value: 'Probationary: 10 pts\nJunior-Senior: 12 pts\nSpecialized-Elite: 15 pts\nElite I-IV: 18 pts\nExecutive+: No quota',
+                        value: 'Probationary: 10 pts\nJunior-Senior: 15-20 pts\nSpecialized: 25 pts\nTactical-Elite: 30 pts\nExecutive+: 20 pts',
                         inline: false
                     }
                 )
